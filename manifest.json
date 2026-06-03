@@ -1,0 +1,17 @@
+{
+  "name": "Duo·Board",
+  "short_name": "DuoBoard",
+  "description": "Gemeinsames Aufgaben- und Investitions-Board",
+  "start_url": "/duo-board/",
+  "display": "standalone",
+  "background_color": "#F5F3EE",
+  "theme_color": "#2D5BE3",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='40' fill='%232D5BE3'/><text x='96' y='135' font-size='100' text-anchor='middle' fill='white'>✦</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
