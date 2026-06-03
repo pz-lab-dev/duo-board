@@ -50,7 +50,7 @@ let dragSrcId = null;
 const COLORS = [
   {id:'blue',  hex:'#3B82F6', label:'Blau — Louis'},
   {id:'green', hex:'#22C55E', label:'Grün — Larina'},
-  {id:'red',   hex:'#EF4444', label:'Rot — Päde'},
+  {id:'red',   hex:'#EF4444', label:'Rot — Pade'},
   {id:'purple',hex:'#A855F7', label:'Violett — Conny'},
   {id:'gray',  hex:'#9CA3AF', label:'Grau — Fam. Zumbach'},
   {id:'yellow',hex:'#F59E0B', label:'Gelb (frei)'},
@@ -58,12 +58,12 @@ const COLORS = [
   {id:'pink',  hex:'#EC4899', label:'Pink (frei)'},
 ];
 
-const PERSON_COLOR = { 'Päde':'red', 'Conny':'purple' };
+const PERSON_COLOR = { 'Pade':'red', 'Conny':'purple' };
 
 const FUER_WEN = [
   {id:'louis',   label:'Louis',        color:'blue'},
   {id:'larina',  label:'Larina',       color:'green'},
-  {id:'paede',   label:'Päde',         color:'red'},
+  {id:'pade',   label:'Pade',         color:'red'},
   {id:'conny',   label:'Conny',        color:'purple'},
   {id:'zumbach', label:'Fam. Zumbach', color:'gray'},
   {id:'diverses',label:'Diverses',     color:''},
@@ -73,7 +73,13 @@ const FUER_WEN = [
   {id:'haus',    label:'Haus',         color:''},
 ];
 
-const PERSONS = ['Päde', 'Conny'];
+const PERSONS = ['Pade', 'Conny'];
+
+// Expose to global scope so inline onclick handlers can access them
+window.COLORS    = COLORS;
+window.PERSONS   = PERSONS;
+window.FUER_WEN  = FUER_WEN;
+window.PERSON_COLOR = PERSON_COLOR;
 
 // ── Auth State ────────────────────────────────────────────────────────
 onAuthStateChanged(auth, user => {
