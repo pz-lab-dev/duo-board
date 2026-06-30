@@ -709,16 +709,16 @@ function themaCardHTML(t){
   const catColor=catColors[t.category]||'#9CA3AF';
   const isBesprochen=t.status==='besprochen';
   const commentItems=(t.comments||[]).map(c=>`<div class="comment-item"><div class="comment-author">${c.author}</div><div class="comment-text">${c.text}</div><div class="comment-time">${c.time||''}</div></div>`).join('');
-  const besprochenActions=isBesprochen?`
+  const actionBar = `
     <div class="thema-action-bar">
-      <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px;font-weight:500">✅ Besprochen — Was jetzt?</div>
+      <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px;font-weight:500">🔧 Direkt erstellen</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-primary" onclick="createTodoFromThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">📋 Aufgabe erstellen</button>
         <button class="btn-secondary" onclick="createInvFromThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">💡 Investition erstellen</button>
-        <button class="btn-secondary" onclick="archiveThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">📁 Archivieren</button>
+        ${!isBesprochen?`<button class="btn-save" onclick="markBesprochen('${t.id}')" style="font-size:.82rem;padding:7px 14px">✅ Als besprochen markieren</button>`:''}
+        ${isBesprochen?`<button class="btn-secondary" onclick="archiveThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">📁 Archivieren</button>`:''}
       </div>
-    </div>`:
-    `<button class="btn-save" onclick="markBesprochen('${t.id}')" style="font-size:.82rem;padding:7px 14px;margin-top:10px">✅ Als besprochen markieren</button>`;
+    </div>`;
 
   return `
   <div class="thema-card ${isBesprochen?'besprochen':''} ${t.pinned?'pinned':''}" id="thc-${t.id}" data-id="${t.id}">
