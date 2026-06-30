@@ -47,16 +47,17 @@ const COLORS = [
 ];
 const PERSON_COLOR = { 'Pade':'red', 'Conny':'purple' };
 const FUER_WEN = [
-  {id:'louis',   label:'Louis',        color:'blue'},
-  {id:'larina',  label:'Larina',       color:'green'},
-  {id:'pade',    label:'Pade',         color:'red'},
-  {id:'conny',   label:'Conny',        color:'purple'},
-  {id:'zumbach', label:'Fam. Zumbach', color:'gray'},
-  {id:'diverses',label:'Diverses',     color:''},
-  {id:'haushalt',label:'Haushalt',     color:''},
-  {id:'hobby',   label:'Hobby',        color:''},
-  {id:'garten',  label:'Garten',       color:''},
-  {id:'haus',    label:'Haus',         color:''},
+  {id:'louis',       label:'Louis',           color:'blue'},
+  {id:'larina',      label:'Larina',          color:'green'},
+  {id:'kids_both',   label:'Larina & Louis',  color:'', dual:['blue','green']},
+  {id:'pade',        label:'Pade',            color:'red'},
+  {id:'conny',       label:'Conny',           color:'purple'},
+  {id:'zumbach',     label:'Fam. Zumbach',    color:'gray'},
+  {id:'diverses',    label:'Diverses',        color:''},
+  {id:'haushalt',    label:'Haushalt',        color:''},
+  {id:'hobby',       label:'Hobby',           color:''},
+  {id:'garten',      label:'Garten',          color:''},
+  {id:'haus',        label:'Haus',            color:''},
 ];
 const PERSONS = ['Pade', 'Conny'];
 const THEMEN_CATS = ['Kinder','Finanzen','Haushalt','Pläne','Ferien','Schule','Diverses'];
@@ -503,6 +504,7 @@ function renderInvestments() {
   if(fwFilter==='kinder') list=list.filter(i=>i.fuerWen==='louis'||i.fuerWen==='larina');
   else if(fwFilter) list=list.filter(i=>i.fuerWen===fwFilter);
   switch(currentInvFilter){
+    case 'all':      list=list.filter(i=>i.status!=='bought'); break;
     case 'pending':  list=list.filter(i=>i.status==='pending'); break;
     case 'approved': list=list.filter(i=>i.status==='approved'); break;
     case 'bought':   list=list.filter(i=>i.status==='bought'); break;
@@ -527,12 +529,16 @@ window.setInvFilter=(f,btn)=>{
 
 function invCardHTML(inv) {
   const myKey=getMyApprovalKey();
-  const chex=inv.color?colorHex(inv.color):'#9CA3AF';
+  const fw=FUER_WEN.find(f=>f.id===inv.fuerWen);
+  // dual-color stripe for "Larina & Louis"
+  const chex = fw?.dual ? `linear-gradient(90deg, ${colorHex(fw.dual[0])} 50%, ${colorHex(fw.dual[1])} 50%)` : (inv.color?colorHex(inv.color):'#9CA3AF');
   const statusMap={pending:'status-pending',approved:'status-approved',rejected:'status-rejected',bought:'status-bought'};
   const statusLabel={pending:'Ausstehend',approved:'Freigegeben',rejected:'Abgelehnt',bought:'Gekauft'};
   const a=inv.approvals||{user1:false,user2:false};
-  const fw=FUER_WEN.find(f=>f.id===inv.fuerWen);
-  const fwBadge=fw?`<span style="padding:1px 7px;border-radius:10px;font-size:.72rem;font-weight:600;background:${fw.color?colorHex(fw.color)+'22':'var(--bg2)'};color:${fw.color?colorHex(fw.color):'var(--text2)'}">🏷 ${fw.label}</span>`:'';
+  const fwBadge=fw?(fw.dual
+    ? `<span style="padding:1px 7px;border-radius:10px;font-size:.72rem;font-weight:600;background:linear-gradient(90deg,${colorHex(fw.dual[0])}22 50%,${colorHex(fw.dual[1])}22 50%);color:var(--text)">🏷 ${fw.label}</span>`
+    : `<span style="padding:1px 7px;border-radius:10px;font-size:.72rem;font-weight:600;background:${fw.color?colorHex(fw.color)+'22':'var(--bg2)'};color:${fw.color?colorHex(fw.color):'var(--text2)'}">🏷 ${fw.label}</span>`
+  ):'';
   const commentItems=(inv.comments||[]).map(c=>`<div class="comment-item"><div class="comment-author">${c.author}</div><div class="comment-text">${c.text}</div><div class="comment-time">${c.time}</div></div>`).join('');
   const colorSwatches=COLORS.map(c=>`<div class="color-swatch ${inv.color===c.id?'selected':''}" style="background:${c.hex}" title="${c.label}" onclick="updateInvField('${inv.id}','color','${c.id}')"></div>`).join('');
   return `
@@ -550,6 +556,7 @@ function invCardHTML(inv) {
       <div style="text-align:right;flex-shrink:0">
         ${inv.price?`<div class="inv-price">CHF ${parseFloat(inv.price).toLocaleString('de-CH',{minimumFractionDigits:2})}</div>`:''}
         <span class="inv-status-badge ${statusMap[inv.status]||'status-pending'}">${statusLabel[inv.status]||'Ausstehend'}</span>
+        ${inv.status==='bought'?`<div style="font-size:.7rem;color:var(--text3);margin-top:3px">${a.user1&&a.user2?'✓✓ Beide stimmten zu':(a.user1||a.user2)?'✓ Nur einer stimmte zu':'Ohne Zustimmung gekauft'}</div>`:''}
       </div>
     </div>
     <div class="inv-approvals">
@@ -559,6 +566,7 @@ function invCardHTML(inv) {
       <button class="approval-chip ${a.user2?'approved':''} ${myKey==='user2'?'my-approval':'other-approval'}" onclick="toggleApproval('${inv.id}','user2')">
         <span>${a.user2?'✓':'○'}</span> ${myKey==='user2'?'Meine Zustimmung':'Zustimmung 1'}
       </button>
+      ${inv.status!=='bought'?`<button class="btn-buy" onclick="event.stopPropagation();markBought('${inv.id}')" title="Als gekauft markieren und ins Archiv verschieben">🛒 Gekauft</button>`:''}
     </div>
     <div class="inv-detail" id="id-${inv.id}">
       <div class="detail-grid" style="margin-top:8px">
@@ -611,9 +619,24 @@ window.toggleApproval=async(id,key)=>{
   const myKey=getMyApprovalKey();
   if(key!==myKey){toast('Du kannst nur deine eigene Zustimmung ändern.','error');return;}
   const approvals={...(inv.approvals||{user1:false,user2:false}),[key]:!inv.approvals?.[key]};
-  const status=approvals.user1&&approvals.user2?'approved':inv.status==='approved'?'pending':inv.status;
+  // "approved" is informational only - never auto-triggers a purchase
+  const status = (approvals.user1&&approvals.user2) ? 'approved'
+                : (inv.status==='approved' ? 'pending' : inv.status);
   await updateDoc(doc(db,'investments',id),{approvals,status,updatedAt:serverTimestamp()});
-  if(approvals.user1&&approvals.user2) toast('🎉 Beide zugestimmt – Freigegeben!','success');
+  if(approvals.user1&&approvals.user2) toast('🎉 Beide zugestimmt – bereit zum Kauf!','success');
+};
+
+window.markBought=id=>{
+  const inv=(window._investments||[]).find(i=>i.id===id); if(!inv) return;
+  const a=inv.approvals||{user1:false,user2:false};
+  const bothApproved = a.user1 && a.user2;
+  const msg = bothApproved
+    ? 'Als gekauft markieren und ins Archiv verschieben?'
+    : 'Achtung: Noch nicht beide haben zugestimmt. Trotzdem als gekauft markieren und ins Archiv verschieben?';
+  openConfirm('Investition kaufen', msg, async ()=>{
+    await updateDoc(doc(db,'investments',id),{status:'bought',boughtAt:new Date().toLocaleDateString('de-CH'),boughtBy:getUserLabel(),updatedAt:serverTimestamp()});
+    toast('🛒 Als gekauft markiert – im Archiv','success');
+  });
 };
 window.updateInvField=async(id,field,value)=>{
   await updateDoc(doc(db,'investments',id),{[field]:value,updatedAt:serverTimestamp()});
@@ -725,6 +748,7 @@ function themaCardHTML(t){
             <option value="">— Auswählen —</option>
             ${THEMEN_CATS.map(c=>`<option value="${c}" ${t.category===c?'selected':''}>${c}</option>`).join('')}
           </select></div>
+        <div class="field-group"><label>Betrag (CHF, optional)</label><input type="number" step="0.01" value="${t.price||''}" placeholder="für eventuelle Investition" onchange="updateThema('${t.id}','price',this.value)"></div>
         <div class="field-group" style="grid-column:1/-1"><label>Notizen</label><textarea onchange="updateThema('${t.id}','description',this.value)" placeholder="Gedanken, Ideen, was besprochen werden soll…">${t.description||''}</textarea></div>
       </div>
       <div class="comments-section">
@@ -785,7 +809,7 @@ window.createTodoFromThema=async themaId=>{
 window.createInvFromThema=async themaId=>{
   const t=(window._themen||[]).find(t=>t.id===themaId); if(!t) return;
   await addDoc(collection(db,'investments'),{
-    name:t.title, description:t.description||'', price:'', link:'', person:'',
+    name:t.title, description:t.description||'', price:t.price||'', link:'', person:'',
     priority:'medium', status:'pending', color:'', fuerWen:'',
     approvals:{user1:false,user2:false}, comments:[],
     fromThema:t.title,
@@ -1191,6 +1215,8 @@ a{color:var(--accent)}
 .approval-chip.approved{background:#D1FAE5;border-color:var(--success);color:#065F46}
 .approval-chip.other-approval{opacity:.6;cursor:not-allowed}
 .approval-chip.other-approval:hover{border-color:var(--border)}
+.btn-buy{display:flex;align-items:center;gap:5px;padding:4px 12px;border-radius:20px;border:1px solid var(--success);background:var(--success);color:white;font-size:.76rem;font-weight:600;transition:all var(--tr);margin-left:auto}
+.btn-buy:hover{opacity:.88;transform:translateY(-1px)}
 .inv-detail{display:none;padding:0 14px 14px 14px;border-top:1px solid var(--border);animation:slideDown .16s ease}
 .inv-card.expanded .inv-detail{display:block}
 
@@ -1327,9 +1353,9 @@ a{color:var(--accent)}
   <header class="header">
     <div class="header-brand"><h1>Duo<span class="dot">·</span>Board</h1></div>
     <nav class="header-nav">
-      <button class="nav-btn active" onclick="showPage('todos')" id="nav-todos">📋 Aufgaben</button>
+      <button class="nav-btn active" onclick="showPage('themen')" id="nav-themen">💬 Themen</button>
+      <button class="nav-btn" onclick="showPage('todos')" id="nav-todos">📋 Aufgaben</button>
       <button class="nav-btn" onclick="showPage('investments')" id="nav-investments">💡 Investitionen</button>
-      <button class="nav-btn" onclick="showPage('themen')" id="nav-themen">💬 Themen</button>
       <button class="nav-btn" onclick="showPage('calendar')" id="nav-calendar">📅 Kalender</button>
     </nav>
     <div class="header-right">
@@ -1343,7 +1369,7 @@ a{color:var(--accent)}
   <main class="main">
 
     <!-- TODOS -->
-    <div class="page active" id="page-todos">
+    <div class="page" id="page-todos">
       <div class="section-title">Aufgaben<div class="section-subtitle">Gemeinsames Board — Änderungen sofort sichtbar</div></div>
       <div class="stats-bar" id="todo-stats"></div>
       <div class="toolbar">
@@ -1374,10 +1400,10 @@ a{color:var(--accent)}
       <div class="toolbar">
         <div class="search-box"><span style="color:var(--text3)">🔍</span><input type="text" placeholder="Investitionen suchen…" id="inv-search" oninput="renderInvestments()"></div>
         <div class="filter-group" id="inv-status-filters">
-          <button class="filter-btn active" onclick="setInvFilter('all',this)">Alle</button>
+          <button class="filter-btn active" onclick="setInvFilter('all',this)">Aktiv</button>
           <button class="filter-btn" onclick="setInvFilter('pending',this)">Ausstehend</button>
           <button class="filter-btn" onclick="setInvFilter('approved',this)">Freigegeben</button>
-          <button class="filter-btn" onclick="setInvFilter('bought',this)">Gekauft</button>
+          <button class="filter-btn" onclick="setInvFilter('bought',this)">📁 Archiv</button>
         </div>
         <button class="btn-primary" onclick="openAddInv()">＋ Neue Investition</button>
         <button class="btn-secondary" onclick="exportCSV('investments')" style="padding:7px 12px;font-size:.8rem">⬇️ CSV</button>
@@ -1388,7 +1414,7 @@ a{color:var(--accent)}
     </div>
 
     <!-- THEMEN -->
-    <div class="page" id="page-themen">
+    <div class="page active" id="page-themen">
       <div class="section-title">Themen<div class="section-subtitle">Dinge die besprochen werden müssen</div></div>
       <div class="stats-bar" id="thema-stats"></div>
       <div class="toolbar">
@@ -1446,6 +1472,7 @@ a{color:var(--accent)}
       <select id="m-fuerwen" onchange="onModalFuerWenChange()">
         <option value="">— Auswählen —</option>
         <option value="louis">Louis</option><option value="larina">Larina</option>
+        <option value="kids_both">Larina & Louis</option>
         <option value="pade">Pade</option><option value="conny">Conny</option>
         <option value="zumbach">Fam. Zumbach</option><option value="diverses">Diverses</option>
         <option value="haushalt">Haushalt</option><option value="hobby">Hobby</option>
