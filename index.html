@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Duo·Board</title>
 <meta name="theme-color" content="#2D5BE3">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Duo·Board">
@@ -12,18 +13,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
 
-<!-- Firebase SDKs -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy, serverTimestamp, getDoc }
+import { getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
+  onSnapshot, query, orderBy, serverTimestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// =====================================================================
-// 🔥 FIREBASE CONFIG — HIER DEINE EIGENEN WERTE EINFÜGEN
-// =====================================================================
 const firebaseConfig = {
   apiKey:            "AIzaSyAf6lHwL1ffEcKYtwkdO5tQnS56yU5N0PY",
   authDomain:        "duo-board-a86c3.firebaseapp.com",
@@ -32,21 +29,12 @@ const firebaseConfig = {
   messagingSenderId: "78828458509",
   appId:             "1:78828458509:web:7c881b5c73e2a3ac79fb44"
 };
-// =====================================================================
 
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
-// ── Globale Zustände ──────────────────────────────────────────────────
-let currentUser = null;
-let unsubTodos = null;
-let unsubInvs  = null;
-let currentTodoFilter = 'open';
-let currentInvFilter  = 'all';
-let currentPersonFilter = '';
-let dragSrcId = null;
-
+// ── CONSTANTS ─────────────────────────────────────────────────────────
 const COLORS = [
   {id:'blue',  hex:'#3B82F6', label:'Blau — Louis'},
   {id:'green', hex:'#22C55E', label:'Grün — Larina'},
@@ -57,13 +45,11 @@ const COLORS = [
   {id:'orange',hex:'#F97316', label:'Orange (frei)'},
   {id:'pink',  hex:'#EC4899', label:'Pink (frei)'},
 ];
-
 const PERSON_COLOR = { 'Pade':'red', 'Conny':'purple' };
-
 const FUER_WEN = [
   {id:'louis',   label:'Louis',        color:'blue'},
   {id:'larina',  label:'Larina',       color:'green'},
-  {id:'pade',   label:'Pade',         color:'red'},
+  {id:'pade',    label:'Pade',         color:'red'},
   {id:'conny',   label:'Conny',        color:'purple'},
   {id:'zumbach', label:'Fam. Zumbach', color:'gray'},
   {id:'diverses',label:'Diverses',     color:''},
@@ -72,85 +58,78 @@ const FUER_WEN = [
   {id:'garten',  label:'Garten',       color:''},
   {id:'haus',    label:'Haus',         color:''},
 ];
-
 const PERSONS = ['Pade', 'Conny'];
+const THEMEN_CATS = ['Kinder','Finanzen','Haushalt','Pläne','Ferien','Schule','Diverses'];
 
-// Expose to global scope so inline onclick handlers can access them
-window.COLORS    = COLORS;
-window.PERSONS   = PERSONS;
-window.FUER_WEN  = FUER_WEN;
-window.PERSON_COLOR = PERSON_COLOR;
+// Expose to global scope for inline handlers
+window.COLORS = COLORS; window.PERSONS = PERSONS;
+window.FUER_WEN = FUER_WEN; window.PERSON_COLOR = PERSON_COLOR;
+window.THEMEN_CATS = THEMEN_CATS;
 
-// ── Auth State ────────────────────────────────────────────────────────
+// ── STATE ─────────────────────────────────────────────────────────────
+let currentUser = null;
+let unsubTodos = null, unsubInvs = null, unsubThemen = null;
+let currentTodoFilter = 'open';
+let currentInvFilter  = 'all';
+let currentPersonFilter = '';
+let dragSrcId = null;
+let calView = 'list';
+let calDate = new Date();
+let calEvents = [];
+
+window._todos = []; window._investments = []; window._themen = [];
+
+// ── AUTH ──────────────────────────────────────────────────────────────
 onAuthStateChanged(auth, user => {
-  if (user) {
-    currentUser = user;
-    showApp();
-    startListeners();
-  } else {
-    currentUser = null;
-    stopListeners();
-    showLogin();
-  }
+  if (user) { currentUser = user; showApp(); startListeners(); }
+  else { currentUser = null; stopListeners(); showLogin(); }
 });
 
-// ── Login ─────────────────────────────────────────────────────────────
 window.doLogin = async () => {
   const email = document.getElementById('l-email').value.trim();
   const pass  = document.getElementById('l-pass').value;
   const err   = document.getElementById('l-error');
   err.textContent = '';
   document.getElementById('l-btn').textContent = 'Anmelden…';
-  try {
-    await signInWithEmailAndPassword(auth, email, pass);
-  } catch(e) {
-    err.textContent = 'E-Mail oder Passwort falsch.';
-    document.getElementById('l-btn').textContent = 'Anmelden';
-  }
+  try { await signInWithEmailAndPassword(auth, email, pass); }
+  catch(e) { err.textContent = 'E-Mail oder Passwort falsch.'; document.getElementById('l-btn').textContent = 'Anmelden'; }
 };
+window.doLogout = async () => { await signOut(auth); };
+window.loginKey = e => { if(e.key==='Enter') window.doLogin(); };
 
-window.doLogout = async () => {
-  await signOut(auth);
-};
-
-// ── Realtime Listeners ─────────────────────────────────────────────────
+// ── LISTENERS ─────────────────────────────────────────────────────────
 function startListeners() {
-  // Todos — ordered by 'order' field, fallback createdAt
-  const qTodos = query(collection(db,'todos'), orderBy('order','asc'));
-  unsubTodos = onSnapshot(qTodos, snap => {
-    window._todos = snap.docs.map(d => ({id:d.id,...d.data()}));
-    renderTodos();
-    renderStats();
+  unsubTodos = onSnapshot(query(collection(db,'todos'), orderBy('order','asc')), snap => {
+    window._todos = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderTodos(); renderStats();
   });
-
-  const qInvs = query(collection(db,'investments'), orderBy('createdAt','desc'));
-  unsubInvs = onSnapshot(qInvs, snap => {
-    window._investments = snap.docs.map(d => ({id:d.id,...d.data()}));
-    renderInvestments();
-    renderStats();
+  unsubInvs = onSnapshot(query(collection(db,'investments'), orderBy('createdAt','desc')), snap => {
+    window._investments = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderInvestments(); renderStats();
+  });
+  unsubThemen = onSnapshot(query(collection(db,'themen'), orderBy('createdAt','desc')), snap => {
+    window._themen = snap.docs.map(d=>({id:d.id,...d.data()}));
+    renderThemen();
   });
 }
-
 function stopListeners() {
-  if (unsubTodos) { unsubTodos(); unsubTodos = null; }
-  if (unsubInvs)  { unsubInvs();  unsubInvs  = null; }
-  window._todos = [];
-  window._investments = [];
+  if(unsubTodos){unsubTodos();unsubTodos=null;}
+  if(unsubInvs){unsubInvs();unsubInvs=null;}
+  if(unsubThemen){unsubThemen();unsubThemen=null;}
+  window._todos=[]; window._investments=[]; window._themen=[];
 }
 
-// ── UI Show/Hide ──────────────────────────────────────────────────────
+// ── UI ────────────────────────────────────────────────────────────────
 function showLogin() {
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.display   = 'none';
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('app-screen').style.display='none';
 }
 function showApp() {
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display   = 'flex';
-  const email = currentUser?.email || '';
-  document.getElementById('user-label').textContent = email;
-  // Approval-Key bestimmen: erster registrierter User = user1, zweiter = user2
-  // Wir nutzen die E-Mail-Adresse als stabilen Identifier
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('app-screen').style.display='flex';
+  document.getElementById('user-label').textContent = currentUser?.email||'';
   const stored = localStorage.getItem('approvalMap') ? JSON.parse(localStorage.getItem('approvalMap')) : {};
+  const email = currentUser?.email||'';
   if (!stored[email]) {
     const keys = Object.values(stored);
     stored[email] = keys.includes('user1') ? 'user2' : 'user1';
@@ -159,193 +138,175 @@ function showApp() {
   localStorage.setItem('myApprovalKey', stored[email]);
 }
 
-// ── Page Nav ──────────────────────────────────────────────────────────
 window.showPage = id => {
-  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
   document.getElementById('nav-'+id).classList.add('active');
+  if (id==='calendar') {
+    const key = localStorage.getItem('calApiKey');
+    const cid = localStorage.getItem('calId');
+    if (key && cid) {
+      document.getElementById('cal-setup-banner').style.display='none';
+      document.getElementById('cal-toolbar').style.display='flex';
+      loadCalendarEvents();
+    }
+  }
 };
 
-// ── Dark Mode ─────────────────────────────────────────────────────────
 window.toggleDark = () => {
-  const on = document.documentElement.dataset.dark === 'true';
+  const on = document.documentElement.dataset.dark==='true';
   document.documentElement.dataset.dark = !on;
-  document.getElementById('dark-icon').textContent = on ? '🌙' : '☀️';
+  document.getElementById('dark-icon').textContent = on?'🌙':'☀️';
   localStorage.setItem('dark', !on);
 };
-if (localStorage.getItem('dark') === 'true') {
-  document.documentElement.dataset.dark = 'true';
-  document.addEventListener('DOMContentLoaded', () => {
-    const el = document.getElementById('dark-icon');
-    if (el) el.textContent = '☀️';
-  });
+if (localStorage.getItem('dark')==='true') {
+  document.documentElement.dataset.dark='true';
+  document.addEventListener('DOMContentLoaded',()=>{ const el=document.getElementById('dark-icon'); if(el) el.textContent='☀️'; });
 }
 
-// ── Toast ─────────────────────────────────────────────────────────────
+// ── TOAST ─────────────────────────────────────────────────────────────
 window.toast = (msg, type='') => {
   const el = document.createElement('div');
   el.className = 'toast';
-  if (type==='error')   el.style.background='var(--danger)';
-  if (type==='success') el.style.background='var(--success)';
+  if(type==='error')   el.style.background='var(--danger)';
+  if(type==='success') el.style.background='var(--success)';
   el.textContent = msg;
   document.getElementById('toast-wrap').appendChild(el);
   setTimeout(()=>el.remove(), 3000);
 };
 
-// ── Confirm ───────────────────────────────────────────────────────────
+// ── CONFIRM ───────────────────────────────────────────────────────────
 window._confirmCb = null;
 window.openConfirm = (title, msg, cb) => {
-  document.getElementById('cf-title').textContent = title;
-  document.getElementById('cf-msg').textContent   = msg;
-  window._confirmCb = cb;
+  document.getElementById('cf-title').textContent=title;
+  document.getElementById('cf-msg').textContent=msg;
+  window._confirmCb=cb;
   document.getElementById('cf-overlay').classList.add('open');
 };
 window.closeConfirm = () => document.getElementById('cf-overlay').classList.remove('open');
-window.doConfirm    = () => { closeConfirm(); window._confirmCb && window._confirmCb(); };
+window.doConfirm = () => { closeConfirm(); window._confirmCb&&window._confirmCb(); };
 
-// ── Utility ───────────────────────────────────────────────────────────
+// ── UTILS ─────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36)+Math.random().toString(36).slice(2); }
 function colorHex(id) { return COLORS.find(c=>c.id===id)?.hex||'#9CA3AF'; }
-function isOverdue(t) {
-  if (!t.dueDate||t.done) return false;
-  return new Date(t.dueDate) < new Date(new Date().toDateString());
-}
-function daysUntil(d) {
-  if (!d) return null;
-  return Math.ceil((new Date(d)-new Date(new Date().toDateString()))/86400000);
-}
-function fmtDate(d) {
-  if (!d) return '';
-  return new Date(d).toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric'});
-}
-function getUserLabel() {
-  const e = currentUser?.email||'';
-  return e.split('@')[0];
+window.colorHex = colorHex;
+function isOverdue(t) { if(!t.dueDate||t.done) return false; return new Date(t.dueDate)<new Date(new Date().toDateString()); }
+function daysUntil(d) { if(!d) return null; return Math.ceil((new Date(d)-new Date(new Date().toDateString()))/86400000); }
+function fmtDate(d) { if(!d) return ''; return new Date(d).toLocaleDateString('de-CH',{day:'2-digit',month:'2-digit',year:'numeric'}); }
+function getUserLabel() { return (currentUser?.email||'').split('@')[0]; }
+function getMyApprovalKey() { return localStorage.getItem('myApprovalKey')||'user1'; }
+
+// ── STATS ─────────────────────────────────────────────────────────────
+function renderStats() {
+  const todos = window._todos||[];
+  const invs  = window._investments||[];
+  const open=todos.filter(t=>!t.done).length, done=todos.filter(t=>t.done).length;
+  const overdue=todos.filter(t=>isOverdue(t)).length, high=todos.filter(t=>!t.done&&t.priority==='high').length;
+  document.getElementById('todo-stats').innerHTML=`
+    <div class="stat-chip"><strong>${open}</strong> offen</div>
+    <div class="stat-chip"><strong>${done}</strong> erledigt</div>
+    ${overdue?`<div class="stat-chip" style="background:#FEE2E2;border-color:var(--danger);color:var(--danger)"><strong>${overdue}</strong> überfällig</div>`:''}
+    ${high?`<div class="stat-chip accent"><strong>${high}</strong> hohe Priorität</div>`:''}`;
+  const invSum=invs.reduce((s,i)=>s+(parseFloat(i.price)||0),0);
+  document.getElementById('inv-stats').innerHTML=`
+    <div class="stat-chip"><strong>${invs.length}</strong> total</div>
+    <div class="stat-chip accent"><strong>${invs.filter(i=>i.status==='approved').length}</strong> freigegeben</div>
+    <div class="stat-chip"><strong>CHF ${invSum.toLocaleString('de-CH',{minimumFractionDigits:2})}</strong></div>`;
 }
 
-// ── TODOS ─────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// TODOS
+// ══════════════════════════════════════════════════════════════════════
 window.quickAdd = async () => {
   const inp = document.getElementById('qa-input');
   const title = inp.value.trim();
-  if (!title) return;
-  const todos = window._todos||[];
-  const maxOrder = todos.reduce((m,t)=>Math.max(m,t.order||0),0);
-  await addDoc(collection(db,'todos'), {
-    title, description:'', person:'', dueDate:'', color:'',
-    priority:'medium', done:false, subtasks:[], comments:[],
-    order: maxOrder+1,
-    createdBy: getUserLabel(),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+  if(!title) return;
+  const maxOrder = (window._todos||[]).reduce((m,t)=>Math.max(m,t.order||0),0);
+  await addDoc(collection(db,'todos'),{
+    title,description:'',person:'',dueDate:'',color:'',priority:'medium',
+    done:false,subtasks:[],comments:[],order:maxOrder+1,
+    createdBy:getUserLabel(),createdAt:serverTimestamp(),updatedAt:serverTimestamp(),
   });
-  inp.value='';
-  toast('Aufgabe hinzugefügt ✓','success');
+  inp.value=''; toast('Aufgabe hinzugefügt ✓','success');
 };
 
-window.setFilter = (f, btn) => {
-  currentTodoFilter = f;
-  currentPersonFilter = '';
+window.setFilter = (f,btn) => {
+  currentTodoFilter=f; currentPersonFilter='';
   document.querySelectorAll('#todo-filters .filter-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('#person-filters .filter-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  renderTodos();
+  btn.classList.add('active'); renderTodos();
 };
-
-window.setPersonFilter = (name, btn) => {
-  if (currentPersonFilter===name) { currentPersonFilter=''; btn.classList.remove('active'); }
-  else { currentPersonFilter=name; document.querySelectorAll('#person-filters .filter-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
+window.setPersonFilter = (name,btn) => {
+  if(currentPersonFilter===name){currentPersonFilter='';btn.classList.remove('active');}
+  else{currentPersonFilter=name;document.querySelectorAll('#person-filters .filter-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
   renderTodos();
-};
-
-window.setInvFilter = (f, btn) => {
-  currentInvFilter = f;
-  document.querySelectorAll('#inv-filters .filter-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  renderInvestments();
 };
 
 function getFilteredTodos() {
-  const q = (document.getElementById('todo-search')?.value||'').toLowerCase();
-  let list = [...(window._todos||[])];
-  if (q) list = list.filter(t=>t.title.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));
-  if (currentPersonFilter) list = list.filter(t=>t.person===currentPersonFilter);
-  switch(currentTodoFilter) {
-    case 'open':     list = list.filter(t=>!t.done); break;
-    case 'done':     list = list.filter(t=>t.done); break;
-    case 'overdue':  list = list.filter(t=>isOverdue(t)); break;
+  const q=(document.getElementById('todo-search')?.value||'').toLowerCase();
+  let list=[...(window._todos||[])];
+  if(q) list=list.filter(t=>t.title.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));
+  if(currentPersonFilter) list=list.filter(t=>t.person===currentPersonFilter);
+  switch(currentTodoFilter){
+    case 'open':     list=list.filter(t=>!t.done); break;
+    case 'done':     list=list.filter(t=>t.done); break;
+    case 'overdue':  list=list.filter(t=>isOverdue(t)); break;
     case 'newest':   list.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)); break;
-    case 'duedate':  list = list.filter(t=>!t.done).sort((a,b)=>(a.dueDate||'9999')>(b.dueDate||'9999')?1:-1); break;
-    case 'priority': { const p={high:0,medium:1,low:2}; list=list.filter(t=>!t.done).sort((a,b)=>(p[a.priority]||1)-(p[b.priority]||1)); break; }
-    case 'kinder':   list = list.filter(t=>!t.done && (t.color==='blue'||t.color==='green')); break;
+    case 'duedate':  list=list.filter(t=>!t.done).sort((a,b)=>(a.dueDate||'9999')>(b.dueDate||'9999')?1:-1); break;
+    case 'priority': {const p={high:0,medium:1,low:2};list=list.filter(t=>!t.done).sort((a,b)=>(p[a.priority]||1)-(p[b.priority]||1));break;}
+    case 'kinder':   list=list.filter(t=>!t.done&&(t.color==='blue'||t.color==='green')); break;
   }
   return list;
 }
 
 function renderPersonFilters() {
-  const persons = [...new Set((window._todos||[]).map(t=>t.person).filter(Boolean))];
-  document.getElementById('person-filters').innerHTML = persons.map(p=>`
-    <button class="filter-btn ${currentPersonFilter===p?'active':''}" onclick="setPersonFilter('${p}',this)">👤 ${p}</button>`).join('');
+  const persons=[...new Set((window._todos||[]).map(t=>t.person).filter(Boolean))];
+  document.getElementById('person-filters').innerHTML=persons.map(p=>
+    `<button class="filter-btn ${currentPersonFilter===p?'active':''}" onclick="setPersonFilter('${p}',this)">👤 ${p}</button>`).join('');
 }
 
 function renderTodos() {
   renderPersonFilters();
-  const list = getFilteredTodos();
-  const container = document.getElementById('tasks-list');
-
-  // Merken welche Karten offen sind
-  const openIds = new Set();
-  document.querySelectorAll('.task-card.expanded').forEach(c => openIds.add(c.dataset.id));
-
-  if (!list.length) {
-    container.innerHTML=`<div class="empty-state"><div class="big-icon">✅</div><p>Keine Aufgaben gefunden</p></div>`;
-    return;
-  }
-  container.innerHTML = list.map(t=>taskCardHTML(t)).join('');
-
-  // Offene Karten wiederherstellen
-  openIds.forEach(id => {
-    const card = document.getElementById('tc-'+id);
-    if (card) card.classList.add('expanded');
-  });
-
+  const list=getFilteredTodos();
+  const container=document.getElementById('tasks-list');
+  const openIds=new Set();
+  document.querySelectorAll('.task-card.expanded').forEach(c=>openIds.add(c.dataset.id));
+  if(!list.length){container.innerHTML=`<div class="empty-state"><div class="big-icon">✅</div><p>Keine Aufgaben gefunden</p></div>`;return;}
+  container.innerHTML=list.map(t=>taskCardHTML(t)).join('');
+  openIds.forEach(id=>{const card=document.getElementById('tc-'+id);if(card)card.classList.add('expanded');});
   container.querySelectorAll('.task-card').forEach(card=>{
-    card.addEventListener('dragstart', onDragStart);
-    card.addEventListener('dragover',  onDragOver);
-    card.addEventListener('drop',      onDrop);
-    card.addEventListener('dragend',   onDragEnd);
+    card.addEventListener('dragstart',onDragStart);
+    card.addEventListener('dragover',onDragOver);
+    card.addEventListener('drop',onDrop);
+    card.addEventListener('dragend',onDragEnd);
   });
 }
 
 function taskCardHTML(t) {
-  const overdue   = isOverdue(t);
-  const days      = daysUntil(t.dueDate);
-  const chex      = t.color ? colorHex(t.color) : '#E5E7EB';
-  const sdone     = (t.subtasks||[]).filter(s=>s.done).length;
-  const stotal    = (t.subtasks||[]).length;
-  const pClass    = {high:'p-high',medium:'p-medium',low:'p-low'}[t.priority]||'p-medium';
+  const overdue=isOverdue(t), days=daysUntil(t.dueDate);
+  const chex=t.color?colorHex(t.color):'#E5E7EB';
+  const sdone=(t.subtasks||[]).filter(s=>s.done).length, stotal=(t.subtasks||[]).length;
+  const pClass={high:'p-high',medium:'p-medium',low:'p-low'}[t.priority]||'p-medium';
   let dueBadge='';
-  if (!t.done&&t.dueDate) {
-    if (overdue) dueBadge=`<span class="task-badge badge-overdue">⚠️ Überfällig</span>`;
-    else if (days<=3) dueBadge=`<span class="task-badge badge-soon">📅 ${days===0?'Heute':days+'d'}</span>`;
+  if(!t.done&&t.dueDate){
+    if(overdue) dueBadge=`<span class="task-badge badge-overdue">⚠️ Überfällig</span>`;
+    else if(days<=3) dueBadge=`<span class="task-badge badge-soon">📅 ${days===0?'Heute':days+'d'}</span>`;
     else dueBadge=`<span style="font-size:.78rem;color:var(--text3)">📅 ${fmtDate(t.dueDate)}</span>`;
   }
-  const personBadge = t.person?`<span class="task-badge badge-person">👤 ${t.person}</span>`:'';
-  const progressBar = stotal>0?`<div class="progress-bar" style="margin:0 16px 8px 20px"><div class="progress-fill" style="width:${Math.round(sdone/stotal*100)}%"></div></div>`:'';
-  const colorSwatches = COLORS.map(c=>`<div class="color-swatch ${t.color===c.id?'selected':''}" style="background:${c.hex}" title="${c.label}" onclick="setTaskColor('${t.id}','${c.id}')"></div>`).join('');
-  const subtaskItems = (t.subtasks||[]).map(s=>`
+  const personBadge=t.person?`<span class="task-badge badge-person">👤 ${t.person}</span>`:'';
+  const progressBar=stotal>0?`<div class="progress-bar" style="margin:0 16px 8px 20px"><div class="progress-fill" style="width:${Math.round(sdone/stotal*100)}%"></div></div>`:'';
+  const colorSwatches=COLORS.map(c=>`<div class="color-swatch ${t.color===c.id?'selected':''}" style="background:${c.hex}" title="${c.label}" onclick="setTaskColor('${t.id}','${c.id}')"></div>`).join('');
+  const subtaskItems=(t.subtasks||[]).map(s=>`
     <div class="subtask-item ${s.done?'done-sub':''}" id="sub-${s.id}">
       <input type="checkbox" ${s.done?'checked':''} onchange="toggleSubtask('${t.id}','${s.id}')">
       <input type="text" value="${(s.title||'').replace(/"/g,'&quot;')}" onblur="saveSubtask('${t.id}','${s.id}',this.value)">
       <button onclick="deleteSubtask('${t.id}','${s.id}')" style="color:var(--text3);font-size:.8rem;padding:2px">✕</button>
     </div>`).join('');
-  const commentItems = (t.comments||[]).map(c=>`
-    <div class="comment-item">
-      <div class="comment-author">${c.author}</div>
-      <div class="comment-text">${c.text}</div>
-      <div class="comment-time">${c.time||''}</div>
-    </div>`).join('');
-  const changelog = (t.changelog||[]).slice(-3).reverse().map(l=>`<span>${l}</span>`).join('');
+  const commentItems=(t.comments||[]).map(c=>`
+    <div class="comment-item"><div class="comment-author">${c.author}</div><div class="comment-text">${c.text}</div><div class="comment-time">${c.time||''}</div></div>`).join('');
+  const changelog=(t.changelog||[]).slice(-3).reverse().map(l=>`<span>${l}</span>`).join('');
+  const fromThema = t.fromThema ? `<div style="font-size:.73rem;color:var(--accent);margin-bottom:4px;padding:0 20px">📌 Aus Thema: ${t.fromThema}</div>` : '';
   return `
   <div class="task-card ${t.done?'done':''} ${overdue?'overdue overdue-h':''}" id="tc-${t.id}" draggable="true" data-id="${t.id}">
     <div class="color-strip" style="background:${chex}"></div>
@@ -359,6 +320,7 @@ function taskCardHTML(t) {
         <span class="expand-icon">▶</span>
       </div>
     </div>
+    ${fromThema}
     ${progressBar}
     <div class="task-detail" id="td-${t.id}">
       <div class="detail-grid">
@@ -390,7 +352,7 @@ function taskCardHTML(t) {
         <h4>Kommentare</h4>
         <div id="comments-${t.id}">${commentItems}</div>
         <div class="comment-add">
-          <input type="text" id="ci-${t.id}" placeholder="Kommentar schreiben..." onkeydown="if(event.key==='Enter')addComment('${t.id}')">
+          <input type="text" id="ci-${t.id}" placeholder="Kommentar…" onkeydown="if(event.key==='Enter')addComment('${t.id}')">
           <button class="btn-save" onclick="addComment('${t.id}')" style="padding:7px 12px">✉</button>
         </div>
       </div>
@@ -405,307 +367,226 @@ function taskCardHTML(t) {
 }
 
 window.toggleExpand = id => document.getElementById('tc-'+id)?.classList.toggle('expanded');
-
 window.toggleDone = async id => {
-  const t = (window._todos||[]).find(t=>t.id===id);
-  if (!t) return;
-  const newDone = !t.done;
-  const cl = [...(t.changelog||[]), `${new Date().toLocaleString('de-CH')}: ${newDone?'Erledigt':'Wieder geöffnet'} von ${getUserLabel()}`];
+  const t=(window._todos||[]).find(t=>t.id===id); if(!t) return;
+  const newDone=!t.done;
+  const cl=[...(t.changelog||[]),`${new Date().toLocaleString('de-CH')}: ${newDone?'Erledigt':'Wieder geöffnet'} von ${getUserLabel()}`];
   await updateDoc(doc(db,'todos',id),{done:newDone,changelog:cl,updatedAt:serverTimestamp()});
   toast(newDone?'✓ Erledigt!':'Wieder geöffnet','success');
 };
-
-window.setTaskPerson = async (id, person) => {
-  const autoColor = PERSON_COLOR[person] || null;
-  const updates = {person, updatedAt:serverTimestamp()};
-  if (autoColor) updates.color = autoColor;
-  const t = (window._todos||[]).find(t=>t.id===id);
-  const cl = [...(t?.changelog||[]), `${new Date().toLocaleString('de-CH')}: Person "${person}" gesetzt von ${getUserLabel()}`];
-  updates.changelog = cl;
-  await updateDoc(doc(db,'todos',id), updates);
+window.setTaskPerson = async (id,person) => {
+  const autoColor=PERSON_COLOR[person]||null;
+  const t=(window._todos||[]).find(t=>t.id===id);
+  const cl=[...(t?.changelog||[]),`${new Date().toLocaleString('de-CH')}: Person "${person}" gesetzt`];
+  const updates={person,changelog:cl,updatedAt:serverTimestamp()};
+  if(autoColor) updates.color=autoColor;
+  await updateDoc(doc(db,'todos',id),updates);
 };
-
-window.updateTodoField = async (id, field, value) => {
-  const t = (window._todos||[]).find(t=>t.id===id);
-  if (!t) return;
-  const cl = [...(t.changelog||[]), `${new Date().toLocaleString('de-CH')}: "${field}" geändert von ${getUserLabel()}`];
+window.updateTodoField = async (id,field,value) => {
+  const t=(window._todos||[]).find(t=>t.id===id); if(!t) return;
+  const cl=[...(t.changelog||[]),`${new Date().toLocaleString('de-CH')}: "${field}" geändert`];
   await updateDoc(doc(db,'todos',id),{[field]:value,changelog:cl,updatedAt:serverTimestamp()});
 };
-
-window.setTaskColor = async (id, colorId) => {
-  await updateDoc(doc(db,'todos',id),{color:colorId,updatedAt:serverTimestamp()});
-};
-
+window.setTaskColor = async (id,colorId) => { await updateDoc(doc(db,'todos',id),{color:colorId,updatedAt:serverTimestamp()}); };
 window.addSubtask = async taskId => {
-  const inp = document.getElementById('new-sub-'+taskId);
-  const title = inp.value.trim();
-  if (!title) return;
-  const t = (window._todos||[]).find(t=>t.id===taskId);
-  if (!t) return;
-  const subs = [...(t.subtasks||[]), {id:uid(),title,done:false}];
-  await updateDoc(doc(db,'todos',taskId),{subtasks:subs,updatedAt:serverTimestamp()});
-  inp.value='';
+  const inp=document.getElementById('new-sub-'+taskId); const title=inp.value.trim(); if(!title) return;
+  const t=(window._todos||[]).find(t=>t.id===taskId); if(!t) return;
+  const subs=[...(t.subtasks||[]),{id:uid(),title,done:false}];
+  await updateDoc(doc(db,'todos',taskId),{subtasks:subs,updatedAt:serverTimestamp()}); inp.value='';
 };
-
-window.toggleSubtask = async (taskId, subId) => {
-  const t = (window._todos||[]).find(t=>t.id===taskId);
-  if (!t) return;
-  const subs = (t.subtasks||[]).map(s=>s.id===subId?{...s,done:!s.done}:s);
+window.toggleSubtask = async (taskId,subId) => {
+  const t=(window._todos||[]).find(t=>t.id===taskId); if(!t) return;
+  const subs=(t.subtasks||[]).map(s=>s.id===subId?{...s,done:!s.done}:s);
   await updateDoc(doc(db,'todos',taskId),{subtasks:subs,updatedAt:serverTimestamp()});
 };
-
-window.saveSubtask = async (taskId, subId, value) => {
-  const t = (window._todos||[]).find(t=>t.id===taskId);
-  if (!t) return;
-  const subs = (t.subtasks||[]).map(s=>s.id===subId?{...s,title:value}:s);
+window.saveSubtask = async (taskId,subId,value) => {
+  const t=(window._todos||[]).find(t=>t.id===taskId); if(!t) return;
+  const subs=(t.subtasks||[]).map(s=>s.id===subId?{...s,title:value}:s);
   await updateDoc(doc(db,'todos',taskId),{subtasks:subs,updatedAt:serverTimestamp()});
 };
-
-window.deleteSubtask = async (taskId, subId) => {
-  const t = (window._todos||[]).find(t=>t.id===taskId);
-  if (!t) return;
-  const subs = (t.subtasks||[]).filter(s=>s.id!==subId);
+window.deleteSubtask = async (taskId,subId) => {
+  const t=(window._todos||[]).find(t=>t.id===taskId); if(!t) return;
+  const subs=(t.subtasks||[]).filter(s=>s.id!==subId);
   await updateDoc(doc(db,'todos',taskId),{subtasks:subs,updatedAt:serverTimestamp()});
 };
-
 window.addComment = async taskId => {
-  const inp = document.getElementById('ci-'+taskId);
-  const text = inp.value.trim();
-  if (!text) return;
-  const t = (window._todos||[]).find(t=>t.id===taskId);
-  if (!t) return;
-  const comments = [...(t.comments||[]), {id:uid(),author:getUserLabel(),text,time:new Date().toLocaleString('de-CH')}];
-  await updateDoc(doc(db,'todos',taskId),{comments,updatedAt:serverTimestamp()});
-  inp.value='';
+  const inp=document.getElementById('ci-'+taskId); const text=inp.value.trim(); if(!text) return;
+  const t=(window._todos||[]).find(t=>t.id===taskId); if(!t) return;
+  const comments=[...(t.comments||[]),{id:uid(),author:getUserLabel(),text,time:new Date().toLocaleString('de-CH')}];
+  await updateDoc(doc(db,'todos',taskId),{comments,updatedAt:serverTimestamp()}); inp.value='';
 };
-
 window.deleteTask = id => {
   openConfirm('Aufgabe löschen','Diese Aufgabe wirklich löschen?', async ()=>{
-    await deleteDoc(doc(db,'todos',id));
-    toast('Aufgabe gelöscht');
+    await deleteDoc(doc(db,'todos',id)); toast('Aufgabe gelöscht');
   });
 };
 
-// ── Drag & Drop ────────────────────────────────────────────────────────
-function onDragStart(e) { dragSrcId=this.dataset.id; this.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; }
-function onDragOver(e)  { e.preventDefault(); document.querySelectorAll('.task-card').forEach(c=>c.classList.remove('drag-over')); this.classList.add('drag-over'); }
-async function onDrop(e) {
-  e.preventDefault();
-  const targetId = this.dataset.id;
-  if (!dragSrcId||!targetId||dragSrcId===targetId) return;
-  const todos = [...(window._todos||[])];
-  const srcIdx = todos.findIndex(t=>t.id===dragSrcId);
-  const tgtIdx = todos.findIndex(t=>t.id===targetId);
-  const [item] = todos.splice(srcIdx,1);
-  todos.splice(tgtIdx,0,item);
-  // Update order fields in Firebase
-  const updates = todos.map((t,i)=>updateDoc(doc(db,'todos',t.id),{order:i}));
-  await Promise.all(updates);
+// Drag & Drop
+function onDragStart(e){dragSrcId=this.dataset.id;this.classList.add('dragging');e.dataTransfer.effectAllowed='move';}
+function onDragOver(e){e.preventDefault();document.querySelectorAll('.task-card').forEach(c=>c.classList.remove('drag-over'));this.classList.add('drag-over');}
+async function onDrop(e){
+  e.preventDefault(); const targetId=this.dataset.id;
+  if(!dragSrcId||!targetId||dragSrcId===targetId) return;
+  const todos=[...(window._todos||[])];
+  const srcIdx=todos.findIndex(t=>t.id===dragSrcId), tgtIdx=todos.findIndex(t=>t.id===targetId);
+  const [item]=todos.splice(srcIdx,1); todos.splice(tgtIdx,0,item);
+  await Promise.all(todos.map((t,i)=>updateDoc(doc(db,'todos',t.id),{order:i})));
 }
-function onDragEnd() { document.querySelectorAll('.task-card').forEach(c=>{c.classList.remove('dragging');c.classList.remove('drag-over');}); }
+function onDragEnd(){document.querySelectorAll('.task-card').forEach(c=>{c.classList.remove('dragging');c.classList.remove('drag-over');});}
 
-// ── Stats ─────────────────────────────────────────────────────────────
-function renderStats() {
-  const todos = window._todos||[];
-  const invs  = window._investments||[];
-  const open    = todos.filter(t=>!t.done).length;
-  const done    = todos.filter(t=>t.done).length;
-  const overdue = todos.filter(t=>isOverdue(t)).length;
-  const high    = todos.filter(t=>!t.done&&t.priority==='high').length;
-  document.getElementById('todo-stats').innerHTML=`
-    <div class="stat-chip"><strong>${open}</strong> offen</div>
-    <div class="stat-chip"><strong>${done}</strong> erledigt</div>
-    ${overdue?`<div class="stat-chip" style="background:#FEE2E2;border-color:var(--danger);color:var(--danger)"><strong>${overdue}</strong> überfällig</div>`:''}
-    ${high?`<div class="stat-chip accent"><strong>${high}</strong> hohe Priorität</div>`:''}`;
-
-  const invTotal  = invs.length;
-  const invAppr   = invs.filter(i=>i.status==='approved').length;
-  const invSum    = invs.reduce((s,i)=>s+(parseFloat(i.price)||0),0);
-  document.getElementById('inv-stats').innerHTML=`
-    <div class="stat-chip"><strong>${invTotal}</strong> total</div>
-    <div class="stat-chip accent"><strong>${invAppr}</strong> freigegeben</div>
-    <div class="stat-chip"><strong>CHF ${invSum.toLocaleString('de-CH',{minimumFractionDigits:2})}</strong></div>`;
-}
-
-// ── INVESTMENTS ──────────────────────────────────────────────────────
-window._modalInvId = null;
-
+// ══════════════════════════════════════════════════════════════════════
+// INVESTMENTS
+// ══════════════════════════════════════════════════════════════════════
 window.openAddInv = () => {
-  window._modalInvId = null;
-  document.getElementById('modal-title').textContent = 'Neue Investition';
-  ['m-name','m-price','m-desc','m-link'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('m-person').value='';
+  document.getElementById('modal-title').textContent='Neue Investition';
+  ['m-name','m-price','m-desc','m-link','m-person'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('m-priority').value='medium';
   document.getElementById('m-status').value='pending';
-  document.getElementById('m-color').innerHTML=COLORS.map(c=>`<div class="color-swatch" style="background:${c.hex}" title="${c.label}" onclick="selectModalColor('${c.id}',this)"></div>`).join('');
+  document.getElementById('m-fuerwen').value='';
+  document.getElementById('m-color').innerHTML=COLORS.map(c=>`<div class="color-swatch" style="background:${c.hex}" title="${c.label}" onclick="selectModalColor('${c.id}',this)" data-color-id="${c.id}"></div>`).join('');
   document.getElementById('modal-overlay').classList.add('open');
 };
-
-window.selectModalColor = (id,el) => {
+window.selectModalColor=(id,el)=>{
   document.querySelectorAll('#m-color .color-swatch').forEach(s=>s.classList.remove('selected'));
   el.classList.add('selected'); el.dataset.colorId=id;
 };
-
-window.closeModal = e => {
-  if (!e||e.target===document.getElementById('modal-overlay'))
+window.closeModal=e=>{
+  if(!e||e.target===document.getElementById('modal-overlay'))
     document.getElementById('modal-overlay').classList.remove('open');
 };
-
-window.saveInvestment = async () => {
-  const name = document.getElementById('m-name').value.trim();
-  if (!name) { toast('Bitte Produktname eingeben','error'); return; }
-  const colorEl = document.querySelector('#m-color .color-swatch.selected');
-  const data = {
-    name,
-    price:    document.getElementById('m-price').value,
-    description: document.getElementById('m-desc').value,
-    link:     document.getElementById('m-link').value,
-    person:   document.getElementById('m-person').value,
-    priority: document.getElementById('m-priority').value,
-    status:   document.getElementById('m-status').value,
-    color:    colorEl?.dataset.colorId||'',
-  };
-  if (window._modalInvId) {
-    await updateDoc(doc(db,'investments',window._modalInvId),{...data,updatedAt:serverTimestamp()});
-    toast('Gespeichert ✓','success');
-  } else {
-    await addDoc(collection(db,'investments'),{...data,approvals:{user1:false,user2:false},comments:[],createdBy:getUserLabel(),createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
-    toast('Investition hinzugefügt ✓','success');
+window.onModalFuerWenChange = () => {
+  const fw=FUER_WEN.find(f=>f.id===document.getElementById('m-fuerwen').value);
+  if(fw?.color) {
+    document.querySelectorAll('#m-color .color-swatch').forEach(s=>s.classList.remove('selected'));
+    const swatch=document.querySelector(`#m-color .color-swatch[data-color-id="${fw.color}"]`);
+    if(swatch) swatch.classList.add('selected');
   }
+};
+window.saveInvestment = async () => {
+  const name=document.getElementById('m-name').value.trim();
+  if(!name){toast('Bitte Produktname eingeben','error');return;}
+  const colorEl=document.querySelector('#m-color .color-swatch.selected');
+  const fuerWen=document.getElementById('m-fuerwen').value;
+  const fw=FUER_WEN.find(f=>f.id===fuerWen);
+  const data={
+    name, price:document.getElementById('m-price').value,
+    description:document.getElementById('m-desc').value,
+    link:document.getElementById('m-link').value,
+    person:document.getElementById('m-person').value,
+    priority:document.getElementById('m-priority').value,
+    status:document.getElementById('m-status').value,
+    fuerWen, color:colorEl?.dataset.colorId||(fw?.color||''),
+  };
+  await addDoc(collection(db,'investments'),{...data,approvals:{user1:false,user2:false},comments:[],createdBy:getUserLabel(),createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
+  toast('Investition hinzugefügt ✓','success');
   document.getElementById('modal-overlay').classList.remove('open');
 };
 
-window.toggleApproval = async (id, key) => {
-  const inv = (window._investments||[]).find(i=>i.id===id);
-  if (!inv) return;
-  // Jeder User darf nur seinen eigenen Key ändern
-  const myKey = getMyApprovalKey();
-  if (key !== myKey) {
-    toast('Du kannst nur deine eigene Zustimmung ändern.', 'error');
-    return;
-  }
-  const approvals = {...(inv.approvals||{user1:false,user2:false}),[key]:!inv.approvals?.[key]};
-  const status = approvals.user1&&approvals.user2?'approved':inv.status==='approved'?'pending':inv.status;
-  await updateDoc(doc(db,'investments',id),{approvals,status,updatedAt:serverTimestamp()});
-  if (approvals.user1&&approvals.user2) toast('🎉 Beide zugestimmt – Freigegeben!','success');
-};
-
-// Gibt 'user1' oder 'user2' zurück basierend auf der Reihenfolge in Firebase Auth
-// Wir speichern beim Login welcher Slot der User hat
-function getMyApprovalKey() {
-  return localStorage.getItem('myApprovalKey') || 'user1';
-}
-
-window.addInvComment = async invId => {
-  const inp = document.getElementById('ici-'+invId);
-  const text = inp.value.trim();
-  if (!text) return;
-  const inv = (window._investments||[]).find(i=>i.id===invId);
-  if (!inv) return;
-  const comments = [...(inv.comments||[]),{id:uid(),author:getUserLabel(),text,time:new Date().toLocaleString('de-CH')}];
-  await updateDoc(doc(db,'investments',invId),{comments,updatedAt:serverTimestamp()});
-  inp.value='';
-};
-
-window.deleteInv = id => {
-  openConfirm('Investition löschen','Wirklich löschen?', async ()=>{
-    await deleteDoc(doc(db,'investments',id));
-    toast('Gelöscht');
-  });
+window.setFwFilter=(val,btn)=>{
+  document.querySelectorAll('#inv-fw-filters .filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); renderInvestments();
 };
 
 function renderInvestments() {
-  const q = (document.getElementById('inv-search')?.value||'').toLowerCase();
-  // Render Für-wen filter buttons if not yet rendered
-  const fwContainer = document.getElementById('inv-fw-filters');
-  if (fwContainer && !fwContainer.dataset.rendered) {
-    fwContainer.dataset.rendered = '1';
-    fwContainer.innerHTML = '<button class="filter-btn active" data-fw="" onclick="setFwFilter(\'\',this)">Alle</button>'
-      + '<button class="filter-btn" data-fw="kinder" onclick="setFwFilter(\'kinder\',this)">👶 Kinder</button>'
-      + FUER_WEN.map(f=>`<button class="filter-btn" data-fw="${f.id}" onclick="setFwFilter('${f.id}',this)">${f.label}</button>`).join('');
+  const q=(document.getElementById('inv-search')?.value||'').toLowerCase();
+  const fwContainer=document.getElementById('inv-fw-filters');
+  if(fwContainer&&!fwContainer.dataset.rendered){
+    fwContainer.dataset.rendered='1';
+    fwContainer.innerHTML='<button class="filter-btn active" data-fw="" onclick="setFwFilter(\'\',this)">Alle</button>'
+      +'<button class="filter-btn" data-fw="kinder" onclick="setFwFilter(\'kinder\',this)">👶 Kinder</button>'
+      +FUER_WEN.map(f=>`<button class="filter-btn" data-fw="${f.id}" onclick="setFwFilter('${f.id}',this)">${f.label}</button>`).join('');
   }
-  const activeFwBtn = fwContainer?.querySelector('.filter-btn.active');
-  const fwFilter = activeFwBtn?.dataset.fw || '';
-  let list = [...(window._investments||[])];
-  if (q) list=list.filter(i=>i.name.toLowerCase().includes(q)||(i.description||'').toLowerCase().includes(q));
-  if (fwFilter === 'kinder') list=list.filter(i=>i.fuerWen==='louis'||i.fuerWen==='larina');
-  else if (fwFilter) list=list.filter(i=>i.fuerWen===fwFilter);
-  switch(currentInvFilter) {
-    case 'pending':  list=list.filter(i=>i.status==='pending');  break;
+  const activeFwBtn=fwContainer?.querySelector('.filter-btn.active');
+  const fwFilter=activeFwBtn?.dataset.fw||'';
+  let list=[...(window._investments||[])];
+  if(q) list=list.filter(i=>i.name.toLowerCase().includes(q)||(i.description||'').toLowerCase().includes(q));
+  if(fwFilter==='kinder') list=list.filter(i=>i.fuerWen==='louis'||i.fuerWen==='larina');
+  else if(fwFilter) list=list.filter(i=>i.fuerWen===fwFilter);
+  switch(currentInvFilter){
+    case 'pending':  list=list.filter(i=>i.status==='pending'); break;
     case 'approved': list=list.filter(i=>i.status==='approved'); break;
-    case 'bought':   list=list.filter(i=>i.status==='bought');   break;
+    case 'bought':   list=list.filter(i=>i.status==='bought'); break;
   }
-  const container = document.getElementById('inv-grid');
+  const container=document.getElementById('inv-grid');
   renderStats();
-  // Show filtered total
-  const filteredTotal = list.reduce((s,i)=>s+(parseFloat(i.price)||0),0);
-  const filterLabel = fwFilter ? FUER_WEN.find(f=>f.id===fwFilter)?.label : null;
-  const totalEl = document.getElementById('inv-filtered-total');
-  if (totalEl) {
-    totalEl.style.display = fwFilter ? 'block' : 'none';
-    totalEl.textContent = filterLabel ? `Ausgaben "${filterLabel}": CHF ${filteredTotal.toLocaleString('de-CH',{minimumFractionDigits:2})}` : '';
+  const filteredTotal=list.reduce((s,i)=>s+(parseFloat(i.price)||0),0);
+  const totalEl=document.getElementById('inv-filtered-total');
+  const filterLabel=fwFilter?FUER_WEN.find(f=>f.id===fwFilter)?.label:(fwFilter==='kinder'?'Kinder':null);
+  if(totalEl){
+    totalEl.style.display=fwFilter?'block':'none';
+    totalEl.textContent=fwFilter?`Ausgaben "${filterLabel||fwFilter}": CHF ${filteredTotal.toLocaleString('de-CH',{minimumFractionDigits:2})}`:'';
   }
-  if (!list.length) { container.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="big-icon">💡</div><p>Keine Investitionen</p></div>`; return; }
-  container.innerHTML = list.map(i=>invCardHTML(i)).join('');
+  if(!list.length){container.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="big-icon">💡</div><p>Keine Investitionen</p></div>`;return;}
+  container.innerHTML=list.map(i=>invCardHTML(i)).join('');
 }
+window.setInvFilter=(f,btn)=>{
+  currentInvFilter=f;
+  document.querySelectorAll('#inv-status-filters .filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); renderInvestments();
+};
 
 function invCardHTML(inv) {
-  const myKey = getMyApprovalKey();
-  const chex = inv.color?colorHex(inv.color):'#9CA3AF';
-  const statusMap = {pending:'status-pending',approved:'status-approved',rejected:'status-rejected',bought:'status-bought'};
-  const statusLabel = {pending:'Ausstehend',approved:'Freigegeben',rejected:'Abgelehnt',bought:'Gekauft'};
-  const a = inv.approvals||{user1:false,user2:false};
-  const commentItems = (inv.comments||[]).map(c=>`<div class="comment-item"><div class="comment-author">${c.author}</div><div class="comment-text">${c.text}</div><div class="comment-time">${c.time}</div></div>`).join('');
-  const colorSwatches = COLORS.map(c=>`<div class="color-swatch ${inv.color===c.id?'selected':''}" style="background:${c.hex}" title="${c.label}" onclick="updateInvField('${inv.id}','color','${c.id}')"></div>`).join('');
+  const myKey=getMyApprovalKey();
+  const chex=inv.color?colorHex(inv.color):'#9CA3AF';
+  const statusMap={pending:'status-pending',approved:'status-approved',rejected:'status-rejected',bought:'status-bought'};
+  const statusLabel={pending:'Ausstehend',approved:'Freigegeben',rejected:'Abgelehnt',bought:'Gekauft'};
+  const a=inv.approvals||{user1:false,user2:false};
+  const fw=FUER_WEN.find(f=>f.id===inv.fuerWen);
+  const fwBadge=fw?`<span style="padding:1px 7px;border-radius:10px;font-size:.72rem;font-weight:600;background:${fw.color?colorHex(fw.color)+'22':'var(--bg2)'};color:${fw.color?colorHex(fw.color):'var(--text2)'}">🏷 ${fw.label}</span>`:'';
+  const commentItems=(inv.comments||[]).map(c=>`<div class="comment-item"><div class="comment-author">${c.author}</div><div class="comment-text">${c.text}</div><div class="comment-time">${c.time}</div></div>`).join('');
+  const colorSwatches=COLORS.map(c=>`<div class="color-swatch ${inv.color===c.id?'selected':''}" style="background:${c.hex}" title="${c.label}" onclick="updateInvField('${inv.id}','color','${c.id}')"></div>`).join('');
   return `
   <div class="inv-card" id="ic-${inv.id}">
     <div style="height:4px;background:${chex};border-radius:12px 12px 0 0"></div>
     <div class="inv-card-header" onclick="toggleInvExpand('${inv.id}')">
       <div style="flex:1">
         <div class="inv-name">${inv.name}</div>
-        <div style="font-size:.78rem;color:var(--text3);margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <div style="font-size:.78rem;color:var(--text3);margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           ${inv.person?`<span>👤 ${inv.person}</span>`:''}
-          ${inv.fuerWen ? `<span style="padding:1px 7px;border-radius:10px;font-size:.72rem;font-weight:600;background:${FUER_WEN.find(f=>f.id===inv.fuerWen)?.color ? colorHex(FUER_WEN.find(f=>f.id===inv.fuerWen).color)+'22' : 'var(--bg2)'};color:${FUER_WEN.find(f=>f.id===inv.fuerWen)?.color ? colorHex(FUER_WEN.find(f=>f.id===inv.fuerWen).color) : 'var(--text2)'}">🏷 ${FUER_WEN.find(f=>f.id===inv.fuerWen)?.label||''}</span>` : ''}
+          ${fwBadge}
           ${inv.link?`<a href="${inv.link}" target="_blank" onclick="event.stopPropagation()" style="font-size:.78rem">🔗 Link</a>`:''}
         </div>
       </div>
-      <div style="text-align:right">
+      <div style="text-align:right;flex-shrink:0">
         ${inv.price?`<div class="inv-price">CHF ${parseFloat(inv.price).toLocaleString('de-CH',{minimumFractionDigits:2})}</div>`:''}
         <span class="inv-status-badge ${statusMap[inv.status]||'status-pending'}">${statusLabel[inv.status]||'Ausstehend'}</span>
       </div>
     </div>
     <div class="inv-approvals">
       <button class="approval-chip ${a.user1?'approved':''} ${myKey==='user1'?'my-approval':'other-approval'}" onclick="toggleApproval('${inv.id}','user1')">
-        <span>${a.user1?'✓':'○'}</span> ${myKey==='user1'? 'Meine Zustimmung' : 'Zustimmung 2'}
+        <span>${a.user1?'✓':'○'}</span> ${myKey==='user1'?'Meine Zustimmung':'Zustimmung 2'}
       </button>
       <button class="approval-chip ${a.user2?'approved':''} ${myKey==='user2'?'my-approval':'other-approval'}" onclick="toggleApproval('${inv.id}','user2')">
-        <span>${a.user2?'✓':'○'}</span> ${myKey==='user2'? 'Meine Zustimmung' : 'Zustimmung 1'}
+        <span>${a.user2?'✓':'○'}</span> ${myKey==='user2'?'Meine Zustimmung':'Zustimmung 1'}
       </button>
     </div>
     <div class="inv-detail" id="id-${inv.id}">
       <div class="detail-grid" style="margin-top:8px">
         <div class="field-group"><label>Name</label><input type="text" value="${(inv.name||'').replace(/"/g,'&quot;')}" onchange="updateInvField('${inv.id}','name',this.value)"></div>
+        <div class="field-group"><label>Preis (CHF)</label><input type="number" value="${inv.price||''}" step="0.01" onchange="updateInvField('${inv.id}','price',this.value)"></div>
+        <div class="field-group"><label>Zuständig</label>
+          <select onchange="updateInvField('${inv.id}','person',this.value)">
+            <option value="">—</option>${PERSONS.map(p=>`<option value="${p}" ${inv.person===p?'selected':''}>${p}</option>`).join('')}
+          </select></div>
         <div class="field-group"><label>Für wen</label>
           <select onchange="setInvFuerWen('${inv.id}',this.value)">
             <option value="">— Auswählen —</option>
             ${FUER_WEN.map(f=>`<option value="${f.id}" ${inv.fuerWen===f.id?'selected':''}>${f.label}</option>`).join('')}
           </select></div>
-        <div class="field-group"><label>Preis (CHF)</label><input type="number" value="${inv.price||''}" step="0.01" onchange="updateInvField('${inv.id}','price',this.value)"></div>
-        <div class="field-group"><label>Zuständig</label><input type="text" value="${inv.person||''}" onchange="updateInvField('${inv.id}','person',this.value)"></div>
         <div class="field-group"><label>Status</label>
           <select onchange="updateInvField('${inv.id}','status',this.value)">
-            <option value="pending"  ${inv.status==='pending'?'selected':''}>Ausstehend</option>
+            <option value="pending" ${inv.status==='pending'?'selected':''}>Ausstehend</option>
             <option value="approved" ${inv.status==='approved'?'selected':''}>Freigegeben</option>
-            <option value="bought"   ${inv.status==='bought'?'selected':''}>Gekauft</option>
+            <option value="bought" ${inv.status==='bought'?'selected':''}>Gekauft</option>
             <option value="rejected" ${inv.status==='rejected'?'selected':''}>Abgelehnt</option>
           </select></div>
         <div class="field-group"><label>Priorität</label>
           <select onchange="updateInvField('${inv.id}','priority',this.value)">
-            <option value="low"    ${inv.priority==='low'?'selected':''}>Niedrig</option>
+            <option value="low" ${inv.priority==='low'?'selected':''}>Niedrig</option>
             <option value="medium" ${inv.priority==='medium'?'selected':''}>Mittel</option>
-            <option value="high"   ${inv.priority==='high'?'selected':''}>Hoch</option>
+            <option value="high" ${inv.priority==='high'?'selected':''}>Hoch</option>
           </select></div>
-        <div class="field-group"><label>Produktlink</label><input type="url" value="${inv.link||''}" placeholder="https://..." onchange="updateInvField('${inv.id}','link',this.value)"></div>
+        <div class="field-group" style="grid-column:1/-1"><label>Produktlink</label><input type="url" value="${inv.link||''}" placeholder="https://..." onchange="updateInvField('${inv.id}','link',this.value)"></div>
         <div class="field-group" style="grid-column:1/-1"><label>Beschreibung</label><textarea onchange="updateInvField('${inv.id}','description',this.value)">${inv.description||''}</textarea></div>
         <div class="field-group" style="grid-column:1/-1"><label>Farbe</label><div class="color-picker">${colorSwatches}</div></div>
       </div>
@@ -713,7 +594,7 @@ function invCardHTML(inv) {
         <h4>Kommentare</h4>
         <div id="inv-comments-${inv.id}">${commentItems}</div>
         <div class="comment-add">
-          <input type="text" id="ici-${inv.id}" placeholder="Kommentar..." onkeydown="if(event.key==='Enter')addInvComment('${inv.id}')">
+          <input type="text" id="ici-${inv.id}" placeholder="Kommentar…" onkeydown="if(event.key==='Enter')addInvComment('${inv.id}')">
           <button class="btn-save" onclick="addInvComment('${inv.id}')" style="padding:7px 12px">✉</button>
         </div>
       </div>
@@ -724,357 +605,435 @@ function invCardHTML(inv) {
   </div>`;
 }
 
-window.toggleInvExpand = id => document.getElementById('ic-'+id)?.classList.toggle('expanded');
-
-window.setFwFilter = (val, btn) => {
-  document.querySelectorAll('#inv-fw-filters .filter-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  renderInvestments();
+window.toggleInvExpand=id=>document.getElementById('ic-'+id)?.classList.toggle('expanded');
+window.toggleApproval=async(id,key)=>{
+  const inv=(window._investments||[]).find(i=>i.id===id); if(!inv) return;
+  const myKey=getMyApprovalKey();
+  if(key!==myKey){toast('Du kannst nur deine eigene Zustimmung ändern.','error');return;}
+  const approvals={...(inv.approvals||{user1:false,user2:false}),[key]:!inv.approvals?.[key]};
+  const status=approvals.user1&&approvals.user2?'approved':inv.status==='approved'?'pending':inv.status;
+  await updateDoc(doc(db,'investments',id),{approvals,status,updatedAt:serverTimestamp()});
+  if(approvals.user1&&approvals.user2) toast('🎉 Beide zugestimmt – Freigegeben!','success');
 };
-
-window.setInvFuerWen = async (id, fuerWenId) => {
-  const fw = FUER_WEN.find(f=>f.id===fuerWenId);
-  const updates = {fuerWen: fuerWenId, updatedAt: serverTimestamp()};
-  if (fw?.color) updates.color = fw.color;
-  await updateDoc(doc(db,'investments',id), updates);
-};
-
-window.updateInvField = async (id, field, value) => {
+window.updateInvField=async(id,field,value)=>{
   await updateDoc(doc(db,'investments',id),{[field]:value,updatedAt:serverTimestamp()});
 };
+window.setInvFuerWen=async(id,fuerWenId)=>{
+  const fw=FUER_WEN.find(f=>f.id===fuerWenId);
+  const updates={fuerWen:fuerWenId,updatedAt:serverTimestamp()};
+  if(fw?.color) updates.color=fw.color;
+  await updateDoc(doc(db,'investments',id),updates);
+};
+window.addInvComment=async invId=>{
+  const inp=document.getElementById('ici-'+invId); const text=inp.value.trim(); if(!text) return;
+  const inv=(window._investments||[]).find(i=>i.id===invId); if(!inv) return;
+  const comments=[...(inv.comments||[]),{id:uid(),author:getUserLabel(),text,time:new Date().toLocaleString('de-CH')}];
+  await updateDoc(doc(db,'investments',invId),{comments,updatedAt:serverTimestamp()}); inp.value='';
+};
+window.deleteInv=id=>{
+  openConfirm('Investition löschen','Wirklich löschen?',async()=>{
+    await deleteDoc(doc(db,'investments',id)); toast('Gelöscht');
+  });
+};
 
-// ── Notify ────────────────────────────────────────────────────────────
-window.notifyChanges = () => {
-  const todos = window._todos||[];
-  const open  = todos.filter(t=>!t.done).length;
-  const subj  = encodeURIComponent('Änderungen im Duo·Board');
-  const body  = encodeURIComponent(`Hallo,\n\nEs gab Änderungen im gemeinsamen Duo·Board.\nBitte öffne die App und schau nach den aktuellen Aufgaben.\n\nOffene Aufgaben: ${open}\n\nViele Grüsse`);
+// ══════════════════════════════════════════════════════════════════════
+// THEMEN
+// ══════════════════════════════════════════════════════════════════════
+let currentThemaFilter = 'open';
+
+window.setThemaFilter=(f,btn)=>{
+  currentThemaFilter=f;
+  document.querySelectorAll('#thema-filters .filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); renderThemen();
+};
+
+window.quickAddThema=async()=>{
+  const inp=document.getElementById('qa-thema'); const title=inp.value.trim(); if(!title) return;
+  await addDoc(collection(db,'themen'),{
+    title,description:'',category:'',person:getUserLabel(),
+    status:'open',pinned:false,comments:[],
+    createdBy:getUserLabel(),createdAt:serverTimestamp(),updatedAt:serverTimestamp(),
+  });
+  inp.value=''; toast('Thema hinzugefügt ✓','success');
+};
+
+function renderThemen(){
+  const q=(document.getElementById('thema-search')?.value||'').toLowerCase();
+  let list=[...(window._themen||[])];
+  if(q) list=list.filter(t=>t.title.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q));
+  switch(currentThemaFilter){
+    case 'open':      list=list.filter(t=>t.status==='open'); break;
+    case 'besprochen':list=list.filter(t=>t.status==='besprochen'); break;
+    case 'pinned':    list=list.filter(t=>t.pinned); break;
+  }
+  // Pinned first
+  list.sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0));
+  const container=document.getElementById('themen-list');
+  const openCount=(window._themen||[]).filter(t=>t.status==='open').length;
+  document.getElementById('thema-stats').innerHTML=`
+    <div class="stat-chip"><strong>${openCount}</strong> offen</div>
+    <div class="stat-chip"><strong>${(window._themen||[]).filter(t=>t.pinned).length}</strong> 📌 gepinnt</div>
+    <div class="stat-chip"><strong>${(window._themen||[]).filter(t=>t.status==='besprochen').length}</strong> besprochen</div>`;
+  if(!list.length){container.innerHTML=`<div class="empty-state"><div class="big-icon">💬</div><p>Keine Themen gefunden</p></div>`;return;}
+  const openCardIds=new Set();
+  document.querySelectorAll('.thema-card.expanded').forEach(c=>openCardIds.add(c.dataset.id));
+  container.innerHTML=list.map(t=>themaCardHTML(t)).join('');
+  openCardIds.forEach(id=>{const card=document.getElementById('thc-'+id);if(card)card.classList.add('expanded');});
+}
+
+function themaCardHTML(t){
+  const catColors={Kinder:'#3B82F6',Finanzen:'#F59E0B',Haushalt:'#9CA3AF',Pläne:'#A855F7',Ferien:'#22C55E',Schule:'#F97316',Diverses:'#9CA3AF'};
+  const catColor=catColors[t.category]||'#9CA3AF';
+  const isBesprochen=t.status==='besprochen';
+  const commentItems=(t.comments||[]).map(c=>`<div class="comment-item"><div class="comment-author">${c.author}</div><div class="comment-text">${c.text}</div><div class="comment-time">${c.time||''}</div></div>`).join('');
+  const besprochenActions=isBesprochen?`
+    <div class="thema-action-bar">
+      <div style="font-size:.82rem;color:var(--text2);margin-bottom:8px;font-weight:500">✅ Besprochen — Was jetzt?</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="createTodoFromThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">📋 Aufgabe erstellen</button>
+        <button class="btn-secondary" onclick="createInvFromThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">💡 Investition erstellen</button>
+        <button class="btn-secondary" onclick="archiveThema('${t.id}')" style="font-size:.82rem;padding:7px 14px">📁 Archivieren</button>
+      </div>
+    </div>`:
+    `<button class="btn-save" onclick="markBesprochen('${t.id}')" style="font-size:.82rem;padding:7px 14px;margin-top:10px">✅ Als besprochen markieren</button>`;
+
+  return `
+  <div class="thema-card ${isBesprochen?'besprochen':''} ${t.pinned?'pinned':''}" id="thc-${t.id}" data-id="${t.id}">
+    <div style="height:3px;background:${catColor};border-radius:12px 12px 0 0"></div>
+    <div class="thema-header" onclick="toggleThemaExpand('${t.id}')">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${t.pinned?'<span title="Gepinnt">📌</span>':''}
+          <span class="thema-title ${isBesprochen?'besprochen-title':''}">${t.title}</span>
+        </div>
+        <div style="font-size:.76rem;color:var(--text3);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
+          ${t.category?`<span style="padding:1px 7px;border-radius:10px;background:${catColor}22;color:${catColor};font-size:.72rem;font-weight:600">${t.category}</span>`:''}
+          <span>von ${t.createdBy||''}</span>
+          ${t.besprochenAt?`<span>✅ ${t.besprochenAt}</span>`:''}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <button onclick="togglePin('${t.id}');event.stopPropagation()" class="icon-btn" title="Pinnen" style="font-size:.9rem">${t.pinned?'📌':'📍'}</button>
+        <span class="expand-icon">▶</span>
+      </div>
+    </div>
+    <div class="thema-detail" id="thd-${t.id}">
+      <div class="detail-grid" style="margin-top:10px">
+        <div class="field-group"><label>Titel</label><input type="text" value="${(t.title||'').replace(/"/g,'&quot;')}" onchange="updateThema('${t.id}','title',this.value)"></div>
+        <div class="field-group"><label>Kategorie</label>
+          <select onchange="updateThema('${t.id}','category',this.value)">
+            <option value="">— Auswählen —</option>
+            ${THEMEN_CATS.map(c=>`<option value="${c}" ${t.category===c?'selected':''}>${c}</option>`).join('')}
+          </select></div>
+        <div class="field-group" style="grid-column:1/-1"><label>Notizen</label><textarea onchange="updateThema('${t.id}','description',this.value)" placeholder="Gedanken, Ideen, was besprochen werden soll…">${t.description||''}</textarea></div>
+      </div>
+      <div class="comments-section">
+        <h4>Kommentare</h4>
+        <div id="thema-comments-${t.id}">${commentItems}</div>
+        <div class="comment-add">
+          <input type="text" id="tci-${t.id}" placeholder="Gedanken hinzufügen…" onkeydown="if(event.key==='Enter')addThemaComment('${t.id}')">
+          <button class="btn-save" onclick="addThemaComment('${t.id}')" style="padding:7px 12px">✉</button>
+        </div>
+      </div>
+      ${besprochenActions}
+      <div class="detail-actions" style="margin-top:10px">
+        <button class="btn-danger" onclick="deleteThema('${t.id}')">🗑️ Löschen</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+window.toggleThemaExpand=id=>document.getElementById('thc-'+id)?.classList.toggle('expanded');
+window.togglePin=async id=>{
+  const t=(window._themen||[]).find(t=>t.id===id); if(!t) return;
+  await updateDoc(doc(db,'themen',id),{pinned:!t.pinned,updatedAt:serverTimestamp()});
+};
+window.updateThema=async(id,field,value)=>{
+  await updateDoc(doc(db,'themen',id),{[field]:value,updatedAt:serverTimestamp()});
+};
+window.markBesprochen=async id=>{
+  await updateDoc(doc(db,'themen',id),{status:'besprochen',besprochenAt:new Date().toLocaleDateString('de-CH'),updatedAt:serverTimestamp()});
+  toast('Als besprochen markiert ✓','success');
+};
+window.archiveThema=async id=>{
+  await updateDoc(doc(db,'themen',id),{status:'archiviert',updatedAt:serverTimestamp()});
+  toast('Archiviert');
+};
+window.addThemaComment=async themaId=>{
+  const inp=document.getElementById('tci-'+themaId); const text=inp.value.trim(); if(!text) return;
+  const t=(window._themen||[]).find(t=>t.id===themaId); if(!t) return;
+  const comments=[...(t.comments||[]),{id:uid(),author:getUserLabel(),text,time:new Date().toLocaleString('de-CH')}];
+  await updateDoc(doc(db,'themen',themaId),{comments,updatedAt:serverTimestamp()}); inp.value='';
+};
+window.deleteThema=id=>{
+  openConfirm('Thema löschen','Dieses Thema wirklich löschen?',async()=>{
+    await deleteDoc(doc(db,'themen',id)); toast('Thema gelöscht');
+  });
+};
+window.createTodoFromThema=async themaId=>{
+  const t=(window._themen||[]).find(t=>t.id===themaId); if(!t) return;
+  const maxOrder=(window._todos||[]).reduce((m,t)=>Math.max(m,t.order||0),0);
+  await addDoc(collection(db,'todos'),{
+    title:t.title, description:t.description||'', person:'', dueDate:'',
+    color:'', priority:'medium', done:false, subtasks:[], comments:[],
+    order:maxOrder+1, fromThema:t.title,
+    createdBy:getUserLabel(), createdAt:serverTimestamp(), updatedAt:serverTimestamp(),
+  });
+  toast(`Aufgabe "${t.title}" erstellt ✓`,'success');
+  window.showPage('todos');
+};
+window.createInvFromThema=async themaId=>{
+  const t=(window._themen||[]).find(t=>t.id===themaId); if(!t) return;
+  await addDoc(collection(db,'investments'),{
+    name:t.title, description:t.description||'', price:'', link:'', person:'',
+    priority:'medium', status:'pending', color:'', fuerWen:'',
+    approvals:{user1:false,user2:false}, comments:[],
+    fromThema:t.title,
+    createdBy:getUserLabel(), createdAt:serverTimestamp(), updatedAt:serverTimestamp(),
+  });
+  toast(`Investition "${t.title}" erstellt ✓`,'success');
+  window.showPage('investments');
+};
+
+// ══════════════════════════════════════════════════════════════════════
+// CALENDAR
+// ══════════════════════════════════════════════════════════════════════
+window.openCalSettings=()=>{
+  document.getElementById('cal-api-key').value=localStorage.getItem('calApiKey')||'';
+  document.getElementById('cal-id').value=localStorage.getItem('calId')||'';
+  document.getElementById('cal-modal-overlay').classList.add('open');
+};
+window.closeCalModal=e=>{
+  if(!e||e.target===document.getElementById('cal-modal-overlay'))
+    document.getElementById('cal-modal-overlay').classList.remove('open');
+};
+window.saveCalSettings=async()=>{
+  const key=document.getElementById('cal-api-key').value.trim();
+  const cid=document.getElementById('cal-id').value.trim();
+  if(!key||!cid){toast('Bitte beide Felder ausfüllen','error');return;}
+  localStorage.setItem('calApiKey',key); localStorage.setItem('calId',cid);
+  document.getElementById('cal-modal-overlay').classList.remove('open');
+  document.getElementById('cal-setup-banner').style.display='none';
+  document.getElementById('cal-toolbar').style.display='flex';
+  await loadCalendarEvents(); toast('Kalender verbunden ✓','success');
+};
+window.setCalView=(v,btn)=>{
+  calView=v;
+  document.querySelectorAll('.cal-toolbar .filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); renderCalendar();
+};
+window.calNav=dir=>{
+  if(calView==='day'||calView==='list') calDate.setDate(calDate.getDate()+dir);
+  else if(calView==='week') calDate.setDate(calDate.getDate()+dir*7);
+  else calDate.setMonth(calDate.getMonth()+dir);
+  calDate=new Date(calDate); loadCalendarEvents();
+};
+window.calToday=()=>{calDate=new Date();loadCalendarEvents();};
+
+function calDateRange(){
+  const d=new Date(calDate); let tMin,tMax;
+  if(calView==='day'||calView==='list'){
+    tMin=new Date(d.getFullYear(),d.getMonth(),1);
+    tMax=new Date(d.getFullYear(),d.getMonth()+2,1);
+  } else if(calView==='week'){
+    const day=d.getDay(), mon=new Date(d); mon.setDate(d.getDate()-(day===0?6:day-1));
+    tMin=new Date(mon.getFullYear(),mon.getMonth(),mon.getDate());
+    tMax=new Date(tMin); tMax.setDate(tMin.getDate()+7);
+  } else {
+    tMin=new Date(d.getFullYear(),d.getMonth(),1);
+    tMax=new Date(d.getFullYear(),d.getMonth()+1,1);
+    const sp=tMin.getDay(); tMin.setDate(tMin.getDate()-(sp===0?6:sp-1));
+    const ep=tMax.getDay(); tMax.setDate(tMax.getDate()+(ep===0?0:7-ep));
+  }
+  return {tMin,tMax};
+}
+
+window.loadCalendarEvents=async()=>{
+  const calApiKey=localStorage.getItem('calApiKey')||'';
+  const calId=localStorage.getItem('calId')||'';
+  if(!calApiKey||!calId) return;
+  document.getElementById('cal-view').innerHTML='<div class="cal-loading">⏳ Termine werden geladen…</div>';
+  const {tMin,tMax}=calDateRange();
+  const url=`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?key=${calApiKey}&timeMin=${tMin.toISOString()}&timeMax=${tMax.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=100`;
+  try {
+    const res=await fetch(url);
+    if(!res.ok){const err=await res.json();document.getElementById('cal-view').innerHTML=`<div class="cal-error">Fehler: ${err.error?.message||'Unbekannter Fehler'}</div>`;return;}
+    const data=await res.json();
+    calEvents=data.items||[]; renderCalendar();
+  } catch(e){document.getElementById('cal-view').innerHTML=`<div class="cal-error">Verbindungsfehler.</div>`;}
+};
+
+function renderCalendar(){
+  const d=new Date(calDate);
+  const today=new Date(); today.setHours(0,0,0,0);
+
+  if(calView==='list'){
+    document.getElementById('cal-title').textContent='Kommende Termine';
+    const now=new Date();
+    const upcoming=calEvents.filter(e=>{
+      const s=e.start?.dateTime?new Date(e.start.dateTime):new Date(e.start?.date);
+      return s>=now;
+    }).sort((a,b)=>{
+      const aS=a.start?.dateTime?new Date(a.start.dateTime):new Date(a.start?.date);
+      const bS=b.start?.dateTime?new Date(b.start.dateTime):new Date(b.start?.date);
+      return aS-bS;
+    });
+    if(!upcoming.length){document.getElementById('cal-view').innerHTML='<div class="cal-no-events">Keine kommenden Termine 🎉</div>';return;}
+    let lastDate='';
+    const rows=upcoming.map(e=>{
+      const isAllDay=!!e.start?.date&&!e.start?.dateTime;
+      const startDt=isAllDay?new Date(e.start.date):new Date(e.start.dateTime);
+      const dateStr=startDt.toLocaleDateString('de-CH',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
+      const timeStr=isAllDay?'Ganztag':startDt.toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
+      const isNewDate=dateStr!==lastDate; lastDate=dateStr;
+      const dateHeader=isNewDate?`<div class="cal-list-date">${dateStr}</div>`:'';
+      const safetitle=(e.summary||'').replace(/'/g,"\\'");
+      return `${dateHeader}<div class="cal-list-item" onclick="createTaskFromEvent('${safetitle}','${dateStr}')">
+        <div class="cal-list-time">${timeStr}</div>
+        <div class="cal-list-title">${e.summary||'(kein Titel)'}</div>
+        <div class="cal-list-add" title="Als Aufgabe hinzufügen">＋</div>
+      </div>`;
+    }).join('');
+    document.getElementById('cal-view').innerHTML=`<div class="cal-list">${rows}</div>`;
+
+  } else if(calView==='day'){
+    const dateStr=d.toLocaleDateString('de-CH',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+    const dayEvents=calEvents.filter(e=>{
+      const start=e.start?.dateTime?new Date(e.start.dateTime):new Date(e.start?.date);
+      return start.toDateString()===d.toDateString();
+    }).sort((a,b)=>{
+      const aT=a.start?.dateTime?new Date(a.start.dateTime):new Date(a.start?.date);
+      const bT=b.start?.dateTime?new Date(b.start.dateTime):new Date(b.start?.date);
+      return aT-bT;
+    });
+    document.getElementById('cal-title').textContent=d.toLocaleDateString('de-CH',{month:'long',year:'numeric'});
+    const evHtml=dayEvents.length?dayEvents.map(e=>{
+      const isAllDay=!!e.start?.date&&!e.start?.dateTime;
+      const startT=isAllDay?'':new Date(e.start.dateTime).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
+      const endT=isAllDay?'':(e.end?.dateTime?new Date(e.end.dateTime).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'}):'');
+      return `<div class="cal-event ${isAllDay?'cal-allday':''}">
+        <div class="cal-event-time">${isAllDay?'Ganztag':startT+(endT?'–'+endT:'')}</div>
+        <div class="cal-event-body">
+          <div class="cal-event-title">${e.summary||'(kein Titel)'}</div>
+          ${e.location?`<div class="cal-event-loc">📍 ${e.location}</div>`:''}
+        </div>
+      </div>`;
+    }).join(''):`<div class="cal-no-events">Keine Termine 🎉</div>`;
+    document.getElementById('cal-view').innerHTML=`<div class="cal-day">
+      <div class="cal-day-header"><div class="cal-day-title">${dateStr}</div><div class="cal-day-sub">${dayEvents.length} Termin(e)</div></div>
+      <div class="cal-events-list">${evHtml}</div></div>`;
+
+  } else if(calView==='week'){
+    const day=d.getDay(), mon=new Date(d); mon.setDate(d.getDate()-(day===0?6:day-1));
+    const days=Array.from({length:7},(_,i)=>{const dd=new Date(mon);dd.setDate(mon.getDate()+i);return dd;});
+    document.getElementById('cal-title').textContent=`${days[0].toLocaleDateString('de-CH',{day:'2-digit',month:'short'})} – ${days[6].toLocaleDateString('de-CH',{day:'2-digit',month:'short',year:'numeric'})}`;
+    const DAY_NAMES=['Mo','Di','Mi','Do','Fr','Sa','So'];
+    const html=days.map((dd,i)=>{
+      const isToday=dd.toDateString()===today.toDateString();
+      const dayEvs=calEvents.filter(e=>{
+        const start=e.start?.dateTime?new Date(e.start.dateTime):new Date(e.start?.date);
+        return start.toDateString()===dd.toDateString();
+      });
+      const evHtml=dayEvs.slice(0,3).map(e=>{
+        const isAllDay=!!e.start?.date&&!e.start?.dateTime;
+        const startT=isAllDay?'':new Date(e.start.dateTime).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
+        return `<div class="cal-week-event ${isAllDay?'allday':''}" title="${e.summary||''}">${isAllDay?'':startT+' '}${e.summary||'?'}</div>`;
+      }).join('')+(dayEvs.length>3?`<div class="cal-more">+${dayEvs.length-3}</div>`:'');
+      return `<div class="cal-week-day ${isToday?'today':''}">
+        <div class="cal-week-day-header"><div class="cal-week-day-name">${DAY_NAMES[i]}</div><div class="cal-week-day-num">${dd.getDate()}</div></div>
+        <div class="cal-week-events">${evHtml}</div></div>`;
+    }).join('');
+    document.getElementById('cal-view').innerHTML=`<div class="cal-week">${html}</div>`;
+
+  } else {
+    const year=d.getFullYear(), month=d.getMonth();
+    document.getElementById('cal-title').textContent=d.toLocaleDateString('de-CH',{month:'long',year:'numeric'});
+    const firstDay=new Date(year,month,1);
+    const padStart=firstDay.getDay()===0?6:firstDay.getDay()-1;
+    const start=new Date(firstDay); start.setDate(1-padStart);
+    const DAY_NAMES_FULL=['Mo','Di','Mi','Do','Fr','Sa','So'];
+    const headerHtml=DAY_NAMES_FULL.map(n=>`<span>${n}</span>`).join('');
+    let cellsHtml='';
+    for(let i=0;i<42;i++){
+      const cell=new Date(start); cell.setDate(start.getDate()+i);
+      const isToday=cell.toDateString()===today.toDateString();
+      const isOther=cell.getMonth()!==month;
+      const dayEvs=calEvents.filter(e=>{
+        const s=e.start?.dateTime?new Date(e.start.dateTime):new Date(e.start?.date);
+        return s.toDateString()===cell.toDateString();
+      });
+      const evHtml=dayEvs.slice(0,2).map(e=>{
+        const isAllDay=!!e.start?.date&&!e.start?.dateTime;
+        return `<div class="cal-month-event ${isAllDay?'allday':''}" title="${e.summary||''}">${e.summary||'?'}</div>`;
+      }).join('')+(dayEvs.length>2?`<div class="cal-more">+${dayEvs.length-2}</div>`:'');
+      cellsHtml+=`<div class="cal-month-cell ${isToday?'today':''} ${isOther?'other-month':''}"><div class="cal-month-day-num">${cell.getDate()}</div>${evHtml}</div>`;
+    }
+    document.getElementById('cal-view').innerHTML=`<div class="cal-month-header">${headerHtml}</div><div class="cal-month-grid">${cellsHtml}</div>`;
+  }
+}
+
+window.createTaskFromEvent=async(title,dateStr)=>{
+  const maxOrder=(window._todos||[]).reduce((m,t)=>Math.max(m,t.order||0),0);
+  await addDoc(collection(db,'todos'),{
+    title:`📅 ${title}`, description:`Aus Klapp-Termin: ${dateStr}`,
+    person:'',dueDate:'',color:'',priority:'medium',
+    done:false,subtasks:[],comments:[],order:maxOrder+1,
+    createdBy:getUserLabel(),createdAt:serverTimestamp(),updatedAt:serverTimestamp(),
+  });
+  toast(`Aufgabe "${title}" erstellt ✓`,'success');
+  window.showPage('todos');
+};
+
+// ── EXPORT / NOTIFY ───────────────────────────────────────────────────
+window.notifyChanges=()=>{
+  const open=(window._todos||[]).filter(t=>!t.done).length;
+  const themenOpen=(window._themen||[]).filter(t=>t.status==='open').length;
+  const subj=encodeURIComponent('Änderungen im Duo·Board');
+  const body=encodeURIComponent(`Hallo,\n\nEs gab Änderungen im Duo·Board.\n\nOffene Aufgaben: ${open}\nOffene Themen: ${themenOpen}\n\nViele Grüsse`);
   window.open(`mailto:?subject=${subj}&body=${body}`);
   toast('E-Mail-Client geöffnet');
 };
-
-// ── Export ────────────────────────────────────────────────────────────
-window.exportCSV = type => {
-  let rows, fname;
-  if (type==='todos') {
+window.exportCSV=type=>{
+  let rows,fname;
+  if(type==='todos'){
     rows=[['Titel','Person','Fällig','Priorität','Status']];
     (window._todos||[]).forEach(t=>rows.push([t.title,t.person||'',t.dueDate||'',t.priority,t.done?'Erledigt':'Offen']));
     fname='aufgaben.csv';
   } else {
-    rows=[['Name','Preis','Status','Priorität','Person']];
-    (window._investments||[]).forEach(i=>rows.push([i.name,i.price||'',i.status,i.priority,i.person||'']));
+    rows=[['Name','Preis','Status','Für wen','Person']];
+    (window._investments||[]).forEach(i=>rows.push([i.name,i.price||'',i.status,FUER_WEN.find(f=>f.id===i.fuerWen)?.label||'',i.person||'']));
     fname='investitionen.csv';
   }
   const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
-  a.download=fname; a.click();
-  toast('CSV exportiert ✓','success');
+  a.download=fname; a.click(); toast('CSV exportiert ✓','success');
 };
 
-// ── Keypress helpers ──────────────────────────────────────────────────
-window.loginKey = e => { if(e.key==='Enter') doLogin(); };
-
-// Init empty arrays
-window._todos = [];
-window._investments = [];
-
-// ── CALENDAR ──────────────────────────────────────────────────────────
-let calView = 'day';
-let calDate = new Date();
-let calEvents = [];
-let calApiKey = '';
-let calId = '';
-
-function openCalSettings() {
-  calApiKey = localStorage.getItem('calApiKey') || '';
-  calId = localStorage.getItem('calId') || '';
-  document.getElementById('cal-api-key').value = calApiKey;
-  document.getElementById('cal-id').value = calId;
-  document.getElementById('cal-modal-overlay').classList.add('open');
-}
-window.openCalSettings = openCalSettings;
-
-window.closeCalModal = e => {
-  if (!e || e.target === document.getElementById('cal-modal-overlay'))
-    document.getElementById('cal-modal-overlay').classList.remove('open');
-};
-
-window.saveCalSettings = async () => {
-  calApiKey = document.getElementById('cal-api-key').value.trim();
-  calId = document.getElementById('cal-id').value.trim();
-  if (!calApiKey || !calId) { toast('Bitte beide Felder ausfüllen', 'error'); return; }
-  localStorage.setItem('calApiKey', calApiKey);
-  localStorage.setItem('calId', calId);
-  document.getElementById('cal-modal-overlay').classList.remove('open');
-  document.getElementById('cal-setup-banner').style.display = 'none';
-  document.getElementById('cal-toolbar').style.display = 'flex';
-  await loadCalendarEvents();
-  toast('Kalender verbunden ✓', 'success');
-};
-
-window.setCalView = (v, btn) => {
-  calView = v;
-  document.querySelectorAll('.cal-toolbar .filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  renderCalendar();
-};
-
-window.calNav = dir => {
-  if (calView === 'day') calDate.setDate(calDate.getDate() + dir);
-  else if (calView === 'week') calDate.setDate(calDate.getDate() + dir * 7);
-  else calDate.setMonth(calDate.getMonth() + dir);
-  calDate = new Date(calDate);
-  loadCalendarEvents();
-};
-
-window.calToday = () => { calDate = new Date(); loadCalendarEvents(); };
-
-function calDateRange() {
-  const d = new Date(calDate);
-  let tMin, tMax;
-  if (calView === 'day') {
-    tMin = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    tMax = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-  } else if (calView === 'week') {
-    const day = d.getDay();
-    const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-    tMin = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate());
-    tMax = new Date(tMin); tMax.setDate(tMin.getDate() + 7);
-  } else {
-    tMin = new Date(d.getFullYear(), d.getMonth(), 1);
-    tMax = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    // Pad to full weeks
-    const startDay = tMin.getDay(); const padStart = startDay === 0 ? 6 : startDay - 1;
-    tMin.setDate(tMin.getDate() - padStart);
-    const endDay = tMax.getDay(); const padEnd = endDay === 0 ? 0 : 7 - endDay;
-    tMax.setDate(tMax.getDate() + padEnd);
-  }
-  return { tMin, tMax };
-}
-
-window.loadCalendarEvents = async () => {
-  calApiKey = localStorage.getItem('calApiKey') || '';
-  calId = localStorage.getItem('calId') || '';
-  if (!calApiKey || !calId) return;
-
-  document.getElementById('cal-view').innerHTML = '<div class="cal-loading">⏳ Termine werden geladen…</div>';
-  const { tMin, tMax } = calDateRange();
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?key=${calApiKey}&timeMin=${tMin.toISOString()}&timeMax=${tMax.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=100`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const err = await res.json();
-      document.getElementById('cal-view').innerHTML = `<div class="cal-error">Fehler: ${err.error?.message || 'Unbekannter Fehler'}.<br>Bitte API-Key und Kalender-ID prüfen.</div>`;
-      return;
-    }
-    const data = await res.json();
-    calEvents = data.items || [];
-    renderCalendar();
-  } catch(e) {
-    document.getElementById('cal-view').innerHTML = `<div class="cal-error">Verbindungsfehler. Bitte Internetverbindung prüfen.</div>`;
-  }
-};
-
-function renderCalendar() {
-  const d = new Date(calDate);
-  const today = new Date(); today.setHours(0,0,0,0);
-
-  if (calView === 'day') {
-    const dateStr = d.toLocaleDateString('de-CH', {weekday:'long', day:'2-digit', month:'long', year:'numeric'});
-    const isToday = d.toDateString() === today.toDateString();
-    const dayEvents = calEvents.filter(e => {
-      const start = e.start?.dateTime ? new Date(e.start.dateTime) : new Date(e.start?.date);
-      return start.toDateString() === d.toDateString();
-    }).sort((a,b) => {
-      const aT = a.start?.dateTime ? new Date(a.start.dateTime) : new Date(a.start?.date);
-      const bT = b.start?.dateTime ? new Date(b.start.dateTime) : new Date(b.start?.date);
-      return aT - bT;
-    });
-    document.getElementById('cal-title').textContent = d.toLocaleDateString('de-CH', {month:'long', year:'numeric'});
-    const evHtml = dayEvents.length ? dayEvents.map(e => {
-      const isAllDay = !!e.start?.date && !e.start?.dateTime;
-      const startT = isAllDay ? '' : new Date(e.start.dateTime).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'});
-      const endT = isAllDay ? '' : (e.end?.dateTime ? new Date(e.end.dateTime).toLocaleTimeString('de-CH', {hour:'2-digit', minute:'2-digit'}) : '');
-      return `<div class="cal-event ${isAllDay?'cal-allday':''}">
-        <div class="cal-event-time">${isAllDay ? 'Ganztag' : startT+(endT?'–'+endT:'')}</div>
-        <div class="cal-event-body">
-          <div class="cal-event-title">${e.summary||'(kein Titel)'}</div>
-          ${e.location?`<div class="cal-event-loc">📍 ${e.location}</div>`:''}
-          ${e.description?`<div class="cal-event-loc" style="margin-top:2px">${e.description.slice(0,80)}${e.description.length>80?'…':''}</div>`:''}
-        </div>
-      </div>`;
-    }).join('') : `<div class="cal-no-events">Keine Termine ${isToday ? 'heute' : 'an diesem Tag'} 🎉</div>`;
-    document.getElementById('cal-view').innerHTML = `
-      <div class="cal-day">
-        <div class="cal-day-header">
-          <div class="cal-day-title">${dateStr}</div>
-          <div class="cal-day-sub">${dayEvents.length} Termin${dayEvents.length !== 1 ? 'e' : ''}</div>
-        </div>
-        <div class="cal-events-list">${evHtml}</div>
-      </div>`;
-
-  } else if (calView === 'week') {
-    const day = d.getDay();
-    const mon = new Date(d); mon.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
-    const days = Array.from({length:7}, (_,i) => { const dd = new Date(mon); dd.setDate(mon.getDate()+i); return dd; });
-    document.getElementById('cal-title').textContent = `${days[0].toLocaleDateString('de-CH',{day:'2-digit',month:'short'})} – ${days[6].toLocaleDateString('de-CH',{day:'2-digit',month:'short',year:'numeric'})}`;
-    const DAY_NAMES = ['Mo','Di','Mi','Do','Fr','Sa','So'];
-    const html = days.map((dd, i) => {
-      const isToday2 = dd.toDateString() === today.toDateString();
-      const dayEvs = calEvents.filter(e => {
-        const start = e.start?.dateTime ? new Date(e.start.dateTime) : new Date(e.start?.date);
-        return start.toDateString() === dd.toDateString();
-      });
-      const evHtml = dayEvs.slice(0,3).map(e => {
-        const isAllDay = !!e.start?.date && !e.start?.dateTime;
-        const startT = isAllDay ? '' : new Date(e.start.dateTime).toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
-        return `<div class="cal-week-event ${isAllDay?'allday':''}" title="${e.summary||''}">${isAllDay?'':startT+' '}${e.summary||'?'}</div>`;
-      }).join('') + (dayEvs.length > 3 ? `<div class="cal-more">+${dayEvs.length-3} weitere</div>` : '');
-      return `<div class="cal-week-day ${isToday2?'today':''}">
-        <div class="cal-week-day-header">
-          <div class="cal-week-day-name">${DAY_NAMES[i]}</div>
-          <div class="cal-week-day-num">${dd.getDate()}</div>
-        </div>
-        <div class="cal-week-events">${evHtml}</div>
-      </div>`;
-    }).join('');
-    document.getElementById('cal-view').innerHTML = `<div class="cal-week">${html}</div>`;
-
-  } else if (calView === 'list') {
-    document.getElementById('cal-title').textContent = 'Kommende Termine';
-    const now = new Date();
-    const upcoming = calEvents
-      .filter(e => {
-        const s = e.start?.dateTime ? new Date(e.start.dateTime) : new Date(e.start?.date);
-        return s >= now;
-      })
-      .sort((a,b) => {
-        const aS = a.start?.dateTime ? new Date(a.start.dateTime) : new Date(a.start?.date);
-        const bS = b.start?.dateTime ? new Date(b.start.dateTime) : new Date(b.start?.date);
-        return aS - bS;
-      });
-    if (!upcoming.length) {
-      document.getElementById('cal-view').innerHTML = '<div class="cal-no-events">Keine kommenden Termine gefunden.</div>';
-      return;
-    }
-    let lastDate = '';
-    const rows = upcoming.map(e => {
-      const isAllDay = !!e.start?.date && !e.start?.dateTime;
-      const startDt = isAllDay ? new Date(e.start.date) : new Date(e.start.dateTime);
-      const dateStr = startDt.toLocaleDateString('de-CH',{weekday:'short',day:'2-digit',month:'short',year:'numeric'});
-      const timeStr = isAllDay ? 'Ganztag' : startDt.toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'});
-      const isNewDate = dateStr !== lastDate;
-      lastDate = dateStr;
-      const dateHeader = isNewDate ? `<div class="cal-list-date">${dateStr}</div>` : '';
-      return `${dateHeader}
-        <div class="cal-list-item" onclick="createTaskFromEvent('${(e.summary||'').replace(/'/g,"\'")}','${dateStr}')">
-          <div class="cal-list-time">${timeStr}</div>
-          <div class="cal-list-title">${e.summary||'(kein Titel)'}</div>
-          <div class="cal-list-add" title="Als Aufgabe hinzufügen">＋</div>
-        </div>`;
-    }).join('');
-    document.getElementById('cal-view').innerHTML = `<div class="cal-list">${rows}</div>`;
-
-  } else {
-    // Month
-    const year = d.getFullYear(), month = d.getMonth();
-    document.getElementById('cal-title').textContent = d.toLocaleDateString('de-CH',{month:'long',year:'numeric'});
-    const firstDay = new Date(year, month, 1);
-    const padStart = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
-    const start = new Date(firstDay); start.setDate(1 - padStart);
-    const DAY_NAMES_FULL = ['Mo','Di','Mi','Do','Fr','Sa','So'];
-    const headerHtml = DAY_NAMES_FULL.map(n=>`<span>${n}</span>`).join('');
-    let cellsHtml = '';
-    for (let i = 0; i < 42; i++) {
-      const cell = new Date(start); cell.setDate(start.getDate() + i);
-      const isToday3 = cell.toDateString() === today.toDateString();
-      const isOther = cell.getMonth() !== month;
-      const dayEvs = calEvents.filter(e => {
-        const s = e.start?.dateTime ? new Date(e.start.dateTime) : new Date(e.start?.date);
-        return s.toDateString() === cell.toDateString();
-      });
-      const evHtml = dayEvs.slice(0,2).map(e => {
-        const isAllDay = !!e.start?.date && !e.start?.dateTime;
-        return `<div class="cal-month-event ${isAllDay?'allday':''}" title="${e.summary||''}">${e.summary||'?'}</div>`;
-      }).join('') + (dayEvs.length > 2 ? `<div class="cal-more">+${dayEvs.length-2}</div>` : '');
-      cellsHtml += `<div class="cal-month-cell ${isToday3?'today':''} ${isOther?'other-month':''} ${dayEvs.length?'has-events':''}">
-        <div class="cal-month-day-num">${cell.getDate()}</div>
-        ${evHtml}
-      </div>`;
-    }
-    document.getElementById('cal-view').innerHTML = `
-      <div class="cal-month-header">${headerHtml}</div>
-      <div class="cal-month-grid">${cellsHtml}</div>`;
-  }
-}
-
-window.createTaskFromEvent = async (title, dateStr) => {
-  const todos = window._todos||[];
-  const maxOrder = todos.reduce((m,t)=>Math.max(m,t.order||0),0);
-  await addDoc(collection(db,'todos'), {
-    title: `📅 ${title}`,
-    description: `Erstellt aus Klapp-Termin: ${dateStr}`,
-    person:'', dueDate:'', color:'', priority:'medium',
-    done:false, subtasks:[], comments:[],
-    order: maxOrder+1,
-    createdBy: getUserLabel(),
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  });
-  toast(`Aufgabe "${title}" erstellt ✓`, 'success');
-  showPage('todos');
-};
-
-// Init calendar if already connected
-(function initCalendar() {
-  const key = localStorage.getItem('calApiKey');
-  const id  = localStorage.getItem('calId');
-  if (key && id) {
-    document.getElementById('cal-setup-banner').style.display = 'none';
-    document.getElementById('cal-toolbar').style.display = 'flex';
-  }
-})();
-
-// Load calendar when tab is opened
-const _origShowPage = window.showPage;
-window.showPage = id => {
-  _origShowPage(id);
-  if (id === 'calendar') {
-    const key = localStorage.getItem('calApiKey');
-    const cid = localStorage.getItem('calId');
-    if (key && cid && calEvents.length === 0) loadCalendarEvents();
-    else if (key && cid) renderCalendar();
-  }
-};
-
-
-// PWA Service Worker registrieren
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-  });
+// PWA
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
 
 </script>
 
 <style>
 :root {
-  --bg: #F5F3EE; --bg2: #EDEAE3; --surface: #FFFFFF; --surface2: #F9F7F3;
-  --border: #E0DBD2; --text: #1A1814; --text2: #6B6760; --text3: #9C9891;
-  --accent: #2D5BE3; --accent-soft: #EBF0FC;
-  --success: #22A86B; --warning: #E8913A; --danger: #D94040;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,.06); --shadow: 0 4px 12px rgba(0,0,0,.08);
-  --shadow-lg: 0 16px 40px rgba(0,0,0,.12);
-  --radius: 12px; --radius-sm: 8px; --radius-lg: 18px;
-  --tr: .18s cubic-bezier(.4,0,.2,1);
-  --font-d: 'DM Serif Display',serif; --font: 'DM Sans',sans-serif;
+  --bg:#F5F3EE;--bg2:#EDEAE3;--surface:#FFFFFF;--surface2:#F9F7F3;
+  --border:#E0DBD2;--text:#1A1814;--text2:#6B6760;--text3:#9C9891;
+  --accent:#2D5BE3;--accent-soft:#EBF0FC;
+  --success:#22A86B;--warning:#E8913A;--danger:#D94040;
+  --shadow-sm:0 1px 3px rgba(0,0,0,.06);--shadow:0 4px 12px rgba(0,0,0,.08);
+  --shadow-lg:0 16px 40px rgba(0,0,0,.12);
+  --radius:12px;--radius-sm:8px;--radius-lg:18px;
+  --tr:.18s cubic-bezier(.4,0,.2,1);
+  --font-d:'DM Serif Display',serif;--font:'DM Sans',sans-serif;
 }
 [data-dark="true"] {
-  --bg:#0F0E0C; --bg2:#1A1916; --surface:#201E1B; --surface2:#272420;
-  --border:#33302B; --text:#F0EDE6; --text2:#9C9790; --text3:#5C5953;
-  --accent-soft:#1A2650; --shadow-sm:0 1px 3px rgba(0,0,0,.3);
-  --shadow:0 4px 12px rgba(0,0,0,.4); --shadow-lg:0 16px 40px rgba(0,0,0,.6);
+  --bg:#0F0E0C;--bg2:#1A1916;--surface:#201E1B;--surface2:#272420;
+  --border:#33302B;--text:#F0EDE6;--text2:#9C9790;--text3:#5C5953;
+  --accent-soft:#1A2650;--shadow-sm:0 1px 3px rgba(0,0,0,.3);
+  --shadow:0 4px 12px rgba(0,0,0,.4);--shadow-lg:0 16px 40px rgba(0,0,0,.6);
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html{font-size:15px}
@@ -1085,64 +1044,42 @@ a{color:var(--accent)}
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 
-/* ── LOGIN ─────────────────────────── */
-#login-screen{
-  display:flex;align-items:center;justify-content:center;
-  min-height:100vh;background:var(--bg);
-}
-.login-card{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius-lg);padding:40px 36px;
-  width:100%;max-width:380px;box-shadow:var(--shadow-lg);
-}
+/* LOGIN */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:40px 36px;width:100%;max-width:380px;box-shadow:var(--shadow-lg)}
 .login-brand{font-family:var(--font-d);font-size:2rem;text-align:center;margin-bottom:6px}
 .login-brand .dot{color:var(--accent)}
 .login-sub{text-align:center;color:var(--text3);font-size:.88rem;margin-bottom:28px}
 .login-field{margin-bottom:14px}
 .login-field label{display:block;font-size:.78rem;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
-.login-field input{
-  width:100%;padding:10px 14px;border:1px solid var(--border);
-  border-radius:var(--radius-sm);background:var(--surface2);
-  color:var(--text);font-size:.9rem;outline:none;
-  transition:border-color var(--tr),box-shadow var(--tr);
-}
+.login-field input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface2);color:var(--text);font-size:.9rem;outline:none;transition:border-color var(--tr),box-shadow var(--tr)}
 .login-field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .login-error{color:var(--danger);font-size:.82rem;margin-bottom:10px;min-height:18px;text-align:center}
-.login-btn{
-  width:100%;padding:11px;border-radius:var(--radius-sm);
-  background:var(--accent);color:white;font-size:.92rem;font-weight:600;
-  transition:all var(--tr);box-shadow:0 2px 8px rgba(45,91,227,.25);
-}
+.login-btn{width:100%;padding:11px;border-radius:var(--radius-sm);background:var(--accent);color:white;font-size:.92rem;font-weight:600;transition:all var(--tr);box-shadow:0 2px 8px rgba(45,91,227,.25)}
 .login-btn:hover{opacity:.9;transform:translateY(-1px)}
 
-/* ── APP SHELL ─────────────────────── */
+/* APP */
 #app-screen{display:flex;flex-direction:column;min-height:100vh}
-.header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:0 24px;height:58px;
-  background:var(--surface);border-bottom:1px solid var(--border);
-  position:sticky;top:0;z-index:100;box-shadow:var(--shadow-sm);
-}
+.header{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:58px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;box-shadow:var(--shadow-sm)}
 .header-brand h1{font-family:var(--font-d);font-size:1.4rem;letter-spacing:-.02em}
 .header-brand .dot{color:var(--accent)}
 .header-nav{display:flex;gap:4px}
-.nav-btn{padding:6px 14px;border-radius:var(--radius-sm);font-size:.86rem;font-weight:500;color:var(--text2);transition:all var(--tr)}
+.nav-btn{padding:6px 12px;border-radius:var(--radius-sm);font-size:.82rem;font-weight:500;color:var(--text2);transition:all var(--tr)}
 .nav-btn:hover{background:var(--bg2);color:var(--text)}
 .nav-btn.active{background:var(--accent-soft);color:var(--accent)}
 .header-right{display:flex;gap:8px;align-items:center}
 .user-chip{font-size:.78rem;color:var(--text3);padding:4px 10px;background:var(--bg2);border-radius:20px}
-.icon-btn{width:34px;height:34px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:1rem;transition:all var(--tr)}
-.icon-btn:hover{background:var(--bg2);color:var(--text)}
 .btn-notify{padding:7px 13px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border);color:var(--text2);font-size:.8rem;font-weight:500;transition:all var(--tr)}
 .btn-notify:hover{border-color:var(--accent);color:var(--accent)}
+.icon-btn{width:34px;height:34px;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:1rem;transition:all var(--tr)}
+.icon-btn:hover{background:var(--bg2);color:var(--text)}
 
-/* ── MAIN ──────────────────────────── */
 .main{flex:1;padding:24px;max-width:1200px;margin:0 auto;width:100%}
 .page{display:none}.page.active{display:block}
 .section-title{font-family:var(--font-d);font-size:1.55rem;color:var(--text);margin-bottom:20px;letter-spacing:-.02em}
 .section-subtitle{color:var(--text2);font-size:.86rem;margin-top:2px;font-style:italic}
 
-/* ── TOOLBAR ───────────────────────── */
+/* TOOLBAR */
 .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
 .search-box{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 12px;flex:1;min-width:180px;transition:border-color var(--tr),box-shadow var(--tr)}
 .search-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -1157,19 +1094,19 @@ a{color:var(--accent)}
 .btn-secondary{display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:var(--radius-sm);background:var(--surface);color:var(--text2);font-size:.86rem;font-weight:500;border:1px solid var(--border);transition:all var(--tr)}
 .btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
 
-/* ── STATS ─────────────────────────── */
+/* STATS */
 .stats-bar{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
 .stat-chip{padding:7px 14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border);font-size:.8rem;font-weight:500;color:var(--text2)}
 .stat-chip strong{color:var(--text);font-weight:700}
 .stat-chip.accent{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
 
-/* ── QUICK ADD ─────────────────────── */
+/* QUICK ADD */
 .quick-add{display:flex;gap:10px;margin-bottom:18px}
 .quick-add input{flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:.88rem;outline:none;transition:border-color var(--tr),box-shadow var(--tr)}
 .quick-add input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .quick-add input::placeholder{color:var(--text3)}
 
-/* ── TASK CARDS ────────────────────── */
+/* TASK CARDS */
 .tasks-list{display:flex;flex-direction:column;gap:7px}
 .task-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;transition:all var(--tr);box-shadow:var(--shadow-sm);position:relative}
 .task-card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
@@ -1197,9 +1134,9 @@ a{color:var(--accent)}
 .expand-icon{color:var(--text3);font-size:.72rem;transition:transform var(--tr)}
 .task-card.expanded .expand-icon{transform:rotate(90deg)}
 .progress-bar{height:3px;background:var(--bg2);border-radius:2px}
-.progress-fill{height:100%;border-radius:2px;background:var(--accent);transition:width .3s ease}
+.progress-fill{height:100%;border-radius:2px;background:var(--accent);transition:width .3s}
 
-/* ── TASK DETAIL ───────────────────── */
+/* DETAIL */
 .task-detail{display:none;padding:0 16px 14px 16px;border-top:1px solid var(--border);animation:slideDown .16s ease}
 .task-card.expanded .task-detail{display:block}
 @keyframes slideDown{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
@@ -1238,7 +1175,7 @@ a{color:var(--accent)}
 .btn-save{padding:7px 14px;border-radius:var(--radius-sm);background:var(--accent);color:white;font-size:.83rem;font-weight:600;transition:all var(--tr)}
 .btn-save:hover{opacity:.9}
 
-/* ── INVESTMENTS ───────────────────── */
+/* INVESTMENTS */
 .inv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm);transition:all var(--tr)}
 .inv-card:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
@@ -1257,35 +1194,21 @@ a{color:var(--accent)}
 .inv-detail{display:none;padding:0 14px 14px 14px;border-top:1px solid var(--border);animation:slideDown .16s ease}
 .inv-card.expanded .inv-detail{display:block}
 
-/* ── MODAL ─────────────────────────── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity var(--tr)}
-.modal-overlay.open{opacity:1;pointer-events:all}
-.modal{background:var(--surface);border-radius:var(--radius-lg);padding:26px;width:100%;max-width:460px;margin:20px;box-shadow:var(--shadow-lg);transform:translateY(10px);transition:transform var(--tr);max-height:90vh;overflow-y:auto}
-.modal-overlay.open .modal{transform:translateY(0)}
-.modal h2{font-family:var(--font-d);font-size:1.35rem;margin-bottom:14px}
-.modal .field-group{margin-bottom:10px}
-.modal-actions{display:flex;gap:10px;margin-top:18px;justify-content:flex-end}
+/* THEMEN */
+.themen-list{display:flex;flex-direction:column;gap:8px}
+.thema-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm);transition:all var(--tr)}
+.thema-card:hover{box-shadow:var(--shadow);transform:translateY(-1px)}
+.thema-card.pinned{border-color:var(--accent);background:var(--accent-soft)}
+[data-dark="true"] .thema-card.pinned{background:var(--surface)}
+.thema-card.besprochen{opacity:.8}
+.thema-header{display:flex;align-items:center;gap:12px;padding:14px 14px 14px 16px;cursor:pointer}
+.thema-title{font-size:.92rem;font-weight:500;color:var(--text)}
+.thema-title.besprochen-title{text-decoration:line-through;color:var(--text3)}
+.thema-detail{display:none;padding:0 16px 14px 16px;border-top:1px solid var(--border);animation:slideDown .16s ease}
+.thema-card.expanded .thema-detail{display:block}
+.thema-action-bar{margin-top:14px;padding:14px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)}
 
-/* ── CONFIRM ───────────────────────── */
-.cf-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);z-index:250;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity var(--tr)}
-.cf-overlay.open{opacity:1;pointer-events:all}
-.cf-box{background:var(--surface);border-radius:var(--radius-lg);padding:26px;max-width:340px;width:calc(100% - 40px);box-shadow:var(--shadow-lg)}
-.cf-box h3{font-family:var(--font-d);font-size:1.15rem;margin-bottom:7px}
-.cf-box p{font-size:.86rem;color:var(--text2);margin-bottom:18px}
-.cf-actions{display:flex;gap:10px;justify-content:flex-end}
-
-/* ── TOAST ─────────────────────────── */
-.toast-wrap{position:fixed;bottom:22px;right:22px;z-index:300;display:flex;flex-direction:column;gap:7px}
-.toast{padding:11px 16px;border-radius:var(--radius-sm);background:var(--text);color:var(--bg);font-size:.86rem;font-weight:500;box-shadow:var(--shadow-lg);animation:toastIn .22s ease,toastOut .22s ease 2.6s forwards}
-@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes toastOut{from{opacity:1}to{opacity:0;pointer-events:none}}
-
-/* ── EMPTY ─────────────────────────── */
-.empty-state{text-align:center;padding:50px 20px;color:var(--text3)}
-.big-icon{font-size:2.8rem;margin-bottom:10px;opacity:.35}
-
-
-/* ── CALENDAR ──────────────────────────── */
+/* CALENDAR */
 .cal-banner{display:flex;align-items:center;gap:16px;padding:20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px;flex-wrap:wrap}
 .cal-banner-icon{font-size:2rem}
 .cal-banner-text{flex:1;display:flex;flex-direction:column;gap:3px}
@@ -1293,16 +1216,14 @@ a{color:var(--accent)}
 .cal-banner-text span{font-size:.83rem;color:var(--text2)}
 .cal-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
 .cal-nav{display:flex;align-items:center;gap:6px;flex:1}
-.cal-title{font-size:1rem;font-weight:600;color:var(--text);min-width:200px;text-align:center}
-
-/* Day view */
+.cal-title{font-size:1rem;font-weight:600;color:var(--text);min-width:180px;text-align:center}
 .cal-day{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
 .cal-day-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .cal-day-title{font-family:var(--font-d);font-size:1.2rem;color:var(--text)}
 .cal-day-sub{font-size:.82rem;color:var(--text3)}
 .cal-events-list{padding:12px}
 .cal-event{display:flex;gap:12px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:6px;border-left:3px solid var(--accent);background:var(--surface2);transition:all var(--tr)}
-.cal-event:hover{transform:translateX(3px);box-shadow:var(--shadow-sm)}
+.cal-event:hover{transform:translateX(3px)}
 .cal-event-time{font-size:.78rem;font-weight:600;color:var(--accent);min-width:50px;padding-top:1px}
 .cal-event-body{flex:1}
 .cal-event-title{font-size:.88rem;font-weight:500;color:var(--text);margin-bottom:2px}
@@ -1310,38 +1231,29 @@ a{color:var(--accent)}
 .cal-allday{border-left-color:var(--success)}
 .cal-allday .cal-event-time{color:var(--success)}
 .cal-no-events{text-align:center;padding:40px 20px;color:var(--text3);font-size:.88rem}
-
-/* Week view */
 .cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
-.cal-week-day{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);min-height:120px;overflow:hidden;transition:all var(--tr)}
-.cal-week-day:hover{box-shadow:var(--shadow-sm)}
+.cal-week-day{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);min-height:120px;overflow:hidden}
 .cal-week-day.today{border-color:var(--accent);background:var(--accent-soft)}
 .cal-week-day-header{padding:8px;border-bottom:1px solid var(--border);text-align:center}
 .cal-week-day-name{font-size:.7rem;font-weight:600;color:var(--text3);text-transform:uppercase}
 .cal-week-day-num{font-size:1rem;font-weight:700;color:var(--text);line-height:1.3}
 .cal-week-day.today .cal-week-day-num{color:var(--accent)}
 .cal-week-events{padding:4px}
-.cal-week-event{padding:2px 5px;border-radius:3px;font-size:.7rem;font-weight:500;margin-bottom:2px;background:var(--accent-soft);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
+.cal-week-event{padding:2px 5px;border-radius:3px;font-size:.7rem;font-weight:500;margin-bottom:2px;background:var(--accent-soft);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-week-event.allday{background:#D1FAE5;color:#065F46}
-@media(max-width:600px){.cal-week{grid-template-columns:repeat(7,1fr)}.cal-week-day-name{font-size:.6rem}.cal-week-day-num{font-size:.85rem}}
-
-/* Month view */
 .cal-month-header{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px}
 .cal-month-header span{text-align:center;font-size:.73rem;font-weight:600;color:var(--text3);text-transform:uppercase;padding:6px 0}
 .cal-month-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
-.cal-month-cell{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);min-height:80px;padding:6px;transition:all var(--tr)}
-.cal-month-cell:hover{box-shadow:var(--shadow-sm)}
+.cal-month-cell{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);min-height:80px;padding:6px}
 .cal-month-cell.today{border-color:var(--accent);background:var(--accent-soft)}
 .cal-month-cell.other-month{opacity:.4}
-.cal-month-cell.has-events{border-color:var(--border)}
 .cal-month-day-num{font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:4px}
 .cal-month-cell.today .cal-month-day-num{color:var(--accent)}
 .cal-month-event{padding:1px 5px;border-radius:3px;font-size:.68rem;font-weight:500;margin-bottom:2px;background:var(--accent-soft);color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cal-month-event.allday{background:#D1FAE5;color:#065F46}
 .cal-more{font-size:.68rem;color:var(--text3);padding:1px 3px}
-@media(max-width:600px){.cal-month-cell{min-height:50px;padding:3px}.cal-month-event{display:none}.cal-month-day-num{font-size:.72rem}}
-
 .cal-loading{text-align:center;padding:60px 20px;color:var(--text3)}
+.cal-error{background:#FEE2E2;border:1px solid var(--danger);border-radius:var(--radius-sm);padding:14px;font-size:.85rem;color:var(--danger);margin-bottom:16px}
 .cal-list{display:flex;flex-direction:column;gap:2px}
 .cal-list-date{font-size:.78rem;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:14px 0 5px 0;border-top:1px solid var(--border);margin-top:6px}
 .cal-list-date:first-child{border-top:none;margin-top:0}
@@ -1351,49 +1263,73 @@ a{color:var(--accent)}
 .cal-list-title{flex:1;font-size:.9rem;font-weight:500;color:var(--text)}
 .cal-list-add{font-size:1rem;color:var(--text3);transition:color var(--tr);flex-shrink:0}
 .cal-list-item:hover .cal-list-add{color:var(--accent)}
-.cal-error{background:#FEE2E2;border:1px solid var(--danger);border-radius:var(--radius-sm);padding:14px;font-size:.85rem;color:var(--danger);margin-bottom:16px}
 
-/* ── RESPONSIVE ────────────────────── */
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);backdrop-filter:blur(4px);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity var(--tr)}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--surface);border-radius:var(--radius-lg);padding:26px;width:100%;max-width:460px;margin:20px;box-shadow:var(--shadow-lg);transform:translateY(10px);transition:transform var(--tr);max-height:90vh;overflow-y:auto}
+.modal-overlay.open .modal{transform:translateY(0)}
+.modal h2{font-family:var(--font-d);font-size:1.35rem;margin-bottom:14px}
+.modal .field-group{margin-bottom:10px}
+.modal-actions{display:flex;gap:10px;margin-top:18px;justify-content:flex-end}
+
+/* CONFIRM */
+.cf-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(3px);z-index:250;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity var(--tr)}
+.cf-overlay.open{opacity:1;pointer-events:all}
+.cf-box{background:var(--surface);border-radius:var(--radius-lg);padding:26px;max-width:340px;width:calc(100% - 40px);box-shadow:var(--shadow-lg)}
+.cf-box h3{font-family:var(--font-d);font-size:1.15rem;margin-bottom:7px}
+.cf-box p{font-size:.86rem;color:var(--text2);margin-bottom:18px}
+.cf-actions{display:flex;gap:10px;justify-content:flex-end}
+
+/* TOAST */
+.toast-wrap{position:fixed;bottom:22px;right:22px;z-index:300;display:flex;flex-direction:column;gap:7px}
+.toast{padding:11px 16px;border-radius:var(--radius-sm);background:var(--text);color:var(--bg);font-size:.86rem;font-weight:500;box-shadow:var(--shadow-lg);animation:toastIn .22s ease,toastOut .22s ease 2.6s forwards}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes toastOut{from{opacity:1}to{opacity:0;pointer-events:none}}
+
+/* EMPTY */
+.empty-state{text-align:center;padding:50px 20px;color:var(--text3)}
+.big-icon{font-size:2.8rem;margin-bottom:10px;opacity:.35}
+
+/* RESPONSIVE */
 @media(max-width:768px){
   .main{padding:14px}
-  .header{padding:0 14px}
-  .header-brand h1{font-size:1.2rem}
+  .header{padding:0 12px}
+  .header-brand h1{font-size:1.15rem}
   .user-chip{display:none}
   .btn-notify{display:none}
   .inv-grid{grid-template-columns:1fr}
-  .nav-btn{padding:5px 10px;font-size:.8rem}
+  .nav-btn{padding:5px 8px;font-size:.75rem}
+  .cal-week{grid-template-columns:repeat(7,1fr)}
+  .cal-week-day-name{font-size:.6rem}
+  .cal-week-day-num{font-size:.85rem}
+  .cal-month-cell{min-height:50px;padding:3px}
+  .cal-month-event{display:none}
 }
 </style>
 </head>
 <body>
 
-<!-- ══ LOGIN SCREEN ══════════════════════════════════════════════════ -->
+<!-- LOGIN -->
 <div id="login-screen" style="display:flex">
   <div class="login-card">
     <div class="login-brand">Duo<span class="dot">·</span>Board</div>
-    <div class="login-sub">Gemeinsames Aufgaben- & Investitions-Board</div>
-    <div class="login-field">
-      <label>E-Mail</label>
-      <input type="email" id="l-email" placeholder="deine@email.com" onkeydown="loginKey(event)" autocomplete="email">
-    </div>
-    <div class="login-field">
-      <label>Passwort</label>
-      <input type="password" id="l-pass" placeholder="••••••••" onkeydown="loginKey(event)" autocomplete="current-password">
-    </div>
+    <div class="login-sub">Gemeinsames Board für zwei Personen</div>
+    <div class="login-field"><label>E-Mail</label><input type="email" id="l-email" placeholder="deine@email.com" onkeydown="loginKey(event)" autocomplete="email"></div>
+    <div class="login-field"><label>Passwort</label><input type="password" id="l-pass" placeholder="••••••••" onkeydown="loginKey(event)" autocomplete="current-password"></div>
     <div class="login-error" id="l-error"></div>
     <button class="login-btn" id="l-btn" onclick="doLogin()">Anmelden</button>
   </div>
 </div>
 
-<!-- ══ APP SCREEN ════════════════════════════════════════════════════ -->
+<!-- APP -->
 <div id="app-screen" style="display:none">
-
-  <!-- Header -->
   <header class="header">
     <div class="header-brand"><h1>Duo<span class="dot">·</span>Board</h1></div>
     <nav class="header-nav">
       <button class="nav-btn active" onclick="showPage('todos')" id="nav-todos">📋 Aufgaben</button>
       <button class="nav-btn" onclick="showPage('investments')" id="nav-investments">💡 Investitionen</button>
+      <button class="nav-btn" onclick="showPage('themen')" id="nav-themen">💬 Themen</button>
       <button class="nav-btn" onclick="showPage('calendar')" id="nav-calendar">📅 Kalender</button>
     </nav>
     <div class="header-right">
@@ -1406,15 +1342,12 @@ a{color:var(--accent)}
 
   <main class="main">
 
-    <!-- ── TODOS PAGE ─────────────────────────────────────────── -->
+    <!-- TODOS -->
     <div class="page active" id="page-todos">
       <div class="section-title">Aufgaben<div class="section-subtitle">Gemeinsames Board — Änderungen sofort sichtbar</div></div>
       <div class="stats-bar" id="todo-stats"></div>
       <div class="toolbar">
-        <div class="search-box">
-          <span style="color:var(--text3)">🔍</span>
-          <input type="text" placeholder="Aufgaben suchen..." id="todo-search" oninput="renderTodos()">
-        </div>
+        <div class="search-box"><span style="color:var(--text3)">🔍</span><input type="text" placeholder="Aufgaben suchen…" id="todo-search" oninput="renderTodos()"></div>
         <div class="filter-group" id="todo-filters">
           <button class="filter-btn active" onclick="setFilter('open',this)">Offen</button>
           <button class="filter-btn" onclick="setFilter('done',this)">Erledigt</button>
@@ -1428,44 +1361,57 @@ a{color:var(--accent)}
       </div>
       <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap" id="person-filters"></div>
       <div class="quick-add">
-        <input type="text" id="qa-input" placeholder="+ Neue Aufgabe eingeben und Enter drücken..." onkeydown="if(event.key==='Enter')quickAdd()">
+        <input type="text" id="qa-input" placeholder="+ Neue Aufgabe eingeben und Enter drücken…" onkeydown="if(event.key==='Enter')quickAdd()">
         <button class="btn-primary" onclick="quickAdd()">＋ Hinzufügen</button>
       </div>
       <div class="tasks-list" id="tasks-list"></div>
     </div>
 
-    <!-- ── INVESTMENTS PAGE ───────────────────────────────────── -->
+    <!-- INVESTMENTS -->
     <div class="page" id="page-investments">
       <div class="section-title">Investitionen<div class="section-subtitle">Anschaffungen planen und freigeben</div></div>
       <div class="stats-bar" id="inv-stats"></div>
       <div class="toolbar">
-        <div class="search-box">
-          <span style="color:var(--text3)">🔍</span>
-          <input type="text" placeholder="Investitionen suchen..." id="inv-search" oninput="renderInvestments()">
-        </div>
-        <div class="filter-group" id="inv-filters">
+        <div class="search-box"><span style="color:var(--text3)">🔍</span><input type="text" placeholder="Investitionen suchen…" id="inv-search" oninput="renderInvestments()"></div>
+        <div class="filter-group" id="inv-status-filters">
           <button class="filter-btn active" onclick="setInvFilter('all',this)">Alle</button>
           <button class="filter-btn" onclick="setInvFilter('pending',this)">Ausstehend</button>
           <button class="filter-btn" onclick="setInvFilter('approved',this)">Freigegeben</button>
           <button class="filter-btn" onclick="setInvFilter('bought',this)">Gekauft</button>
         </div>
         <button class="btn-primary" onclick="openAddInv()">＋ Neue Investition</button>
-        <div id="inv-fw-filters" class="filter-group" style="flex-wrap:wrap"></div>
         <button class="btn-secondary" onclick="exportCSV('investments')" style="padding:7px 12px;font-size:.8rem">⬇️ CSV</button>
       </div>
+      <div class="filter-group" id="inv-fw-filters" style="margin-bottom:14px;flex-wrap:wrap"></div>
       <div id="inv-filtered-total" style="display:none;margin-bottom:12px;padding:10px 16px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius-sm);font-size:.88rem;font-weight:600;color:var(--accent)"></div>
       <div class="inv-grid" id="inv-grid"></div>
     </div>
 
-    <!-- ── CALENDAR PAGE ──────────────────────────────────────── -->
+    <!-- THEMEN -->
+    <div class="page" id="page-themen">
+      <div class="section-title">Themen<div class="section-subtitle">Dinge die besprochen werden müssen</div></div>
+      <div class="stats-bar" id="thema-stats"></div>
+      <div class="toolbar">
+        <div class="search-box"><span style="color:var(--text3)">🔍</span><input type="text" placeholder="Themen suchen…" id="thema-search" oninput="renderThemen()"></div>
+        <div class="filter-group" id="thema-filters">
+          <button class="filter-btn active" onclick="setThemaFilter('open',this)">Offen</button>
+          <button class="filter-btn" onclick="setThemaFilter('pinned',this)">📌 Gepinnt</button>
+          <button class="filter-btn" onclick="setThemaFilter('besprochen',this)">✅ Besprochen</button>
+        </div>
+      </div>
+      <div class="quick-add">
+        <input type="text" id="qa-thema" placeholder="+ Neues Thema eingeben und Enter drücken…" onkeydown="if(event.key==='Enter')quickAddThema()">
+        <button class="btn-primary" onclick="quickAddThema()">＋ Hinzufügen</button>
+      </div>
+      <div class="themen-list" id="themen-list"></div>
+    </div>
+
+    <!-- CALENDAR -->
     <div class="page" id="page-calendar">
       <div class="section-title">Klapp Kalender<div class="section-subtitle">Schultermine direkt aus Klapp</div></div>
       <div id="cal-setup-banner" class="cal-banner">
         <div class="cal-banner-icon">📅</div>
-        <div class="cal-banner-text">
-          <strong>Google Calendar verbinden</strong>
-          <span>Trage deinen Google API-Key und Kalender-ID ein, um Schultermine anzuzeigen.</span>
-        </div>
+        <div class="cal-banner-text"><strong>Google Calendar verbinden</strong><span>Trage deinen API-Key und Kalender-ID ein.</span></div>
         <button class="btn-primary" onclick="openCalSettings()">Verbinden</button>
       </div>
       <div class="cal-toolbar" id="cal-toolbar" style="display:none">
@@ -1476,12 +1422,13 @@ a{color:var(--accent)}
           <button class="btn-secondary" onclick="calToday()" style="padding:5px 12px;font-size:.82rem;margin-left:4px">Heute</button>
         </div>
         <div class="filter-group">
-          <button class="filter-btn active" onclick="setCalView('day',this)">Tag</button>
+          <button class="filter-btn active" onclick="setCalView('list',this)">Liste</button>
+          <button class="filter-btn" onclick="setCalView('day',this)">Tag</button>
           <button class="filter-btn" onclick="setCalView('week',this)">Woche</button>
           <button class="filter-btn" onclick="setCalView('month',this)">Monat</button>
-          <button class="filter-btn" onclick="setCalView('list',this)">Liste</button>
         </div>
         <button class="btn-secondary" onclick="loadCalendarEvents()" style="padding:7px 12px;font-size:.8rem">🔄 Aktualisieren</button>
+        <button class="btn-secondary" onclick="openCalSettings()" style="padding:7px 12px;font-size:.8rem">⚙️</button>
       </div>
       <div id="cal-view"></div>
     </div>
@@ -1489,53 +1436,29 @@ a{color:var(--accent)}
   </main>
 </div>
 
-<!-- ══ CALENDAR SETTINGS MODAL ════════════════════════════════════════ -->
-<div class="modal-overlay" id="cal-modal-overlay" onclick="closeCalModal(event)">
-  <div class="modal">
-    <h2>📅 Google Calendar verbinden</h2>
-    <p style="font-size:.85rem;color:var(--text2);margin-bottom:16px">Du brauchst einen Google API-Key und deine Kalender-ID.</p>
-    <div class="field-group" style="margin-bottom:12px">
-      <label>Google API Key</label>
-      <input type="text" id="cal-api-key" placeholder="AIzaSy...">
-    </div>
-    <div class="field-group" style="margin-bottom:12px">
-      <label>Kalender-ID</label>
-      <input type="text" id="cal-id" placeholder="deine@gmail.com">
-    </div>
-    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;font-size:.82rem;color:var(--text2);line-height:1.7;margin-bottom:4px">
-      <strong style="color:var(--text);display:block;margin-bottom:6px">So bekommst du den API-Key:</strong>
-      1. Gehe zu <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a><br>
-      2. Neues Projekt → "APIs &amp; Dienste" → "Bibliothek"<br>
-      3. "Google Calendar API" suchen → Aktivieren<br>
-      4. "Anmeldedaten" → "+ Anmeldedaten erstellen" → "API-Schlüssel"<br><br>
-      <strong style="color:var(--text);display:block;margin-bottom:6px">Kalender-ID:</strong>
-      Google Calendar → Einstellungen ⚙️ → Kalender wählen → "Kalender-ID" ganz unten kopieren
-    </div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeCalModal()">Abbrechen</button>
-      <button class="btn-save" onclick="saveCalSettings()">Verbinden & Laden</button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ INVESTMENT MODAL ══════════════════════════════════════════════ -->
+<!-- INVESTMENT MODAL -->
 <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
   <div class="modal">
     <h2 id="modal-title">Neue Investition</h2>
     <div class="field-group"><label>Produktname *</label><input type="text" id="m-name" placeholder="z.B. MacBook Pro"></div>
     <div class="field-group"><label>Preis (CHF)</label><input type="number" id="m-price" placeholder="0.00" step="0.01"></div>
-    <div class="field-group"><label>Beschreibung</label><textarea id="m-desc" placeholder="Details und Bemerkungen..."></textarea></div>
-    <div class="field-group"><label>Produktlink</label><input type="url" id="m-link" placeholder="https://..."></div>
-    <div class="field-group"><label>Zuständige Person</label><input type="text" id="m-person" placeholder="Name eingeben"></div>
+    <div class="field-group"><label>Für wen</label>
+      <select id="m-fuerwen" onchange="onModalFuerWenChange()">
+        <option value="">— Auswählen —</option>
+        <option value="louis">Louis</option><option value="larina">Larina</option>
+        <option value="pade">Pade</option><option value="conny">Conny</option>
+        <option value="zumbach">Fam. Zumbach</option><option value="diverses">Diverses</option>
+        <option value="haushalt">Haushalt</option><option value="hobby">Hobby</option>
+        <option value="garten">Garten</option><option value="haus">Haus</option>
+      </select></div>
+    <div class="field-group"><label>Zuständig</label>
+      <select id="m-person"><option value="">—</option><option value="Pade">Pade</option><option value="Conny">Conny</option></select></div>
+    <div class="field-group"><label>Beschreibung</label><textarea id="m-desc" placeholder="Details…"></textarea></div>
+    <div class="field-group"><label>Produktlink</label><input type="url" id="m-link" placeholder="https://…"></div>
     <div class="field-group"><label>Priorität</label>
-      <select id="m-priority">
-        <option value="medium">Mittel</option><option value="high">Hoch</option><option value="low">Niedrig</option>
-      </select></div>
+      <select id="m-priority"><option value="medium">Mittel</option><option value="high">Hoch</option><option value="low">Niedrig</option></select></div>
     <div class="field-group"><label>Status</label>
-      <select id="m-status">
-        <option value="pending">Ausstehend</option><option value="approved">Freigegeben</option>
-        <option value="bought">Gekauft</option><option value="rejected">Abgelehnt</option>
-      </select></div>
+      <select id="m-status"><option value="pending">Ausstehend</option><option value="approved">Freigegeben</option><option value="bought">Gekauft</option><option value="rejected">Abgelehnt</option></select></div>
     <div class="field-group"><label>Farbe</label><div class="color-picker" id="m-color"></div></div>
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeModal()">Abbrechen</button>
@@ -1544,11 +1467,29 @@ a{color:var(--accent)}
   </div>
 </div>
 
-<!-- ══ CONFIRM ═══════════════════════════════════════════════════════ -->
+<!-- CALENDAR SETTINGS MODAL -->
+<div class="modal-overlay" id="cal-modal-overlay" onclick="closeCalModal(event)">
+  <div class="modal">
+    <h2>📅 Google Calendar verbinden</h2>
+    <div class="field-group" style="margin-bottom:12px"><label>Google API Key</label><input type="text" id="cal-api-key" placeholder="AIzaSy…"></div>
+    <div class="field-group" style="margin-bottom:12px"><label>Kalender-ID</label><input type="text" id="cal-id" placeholder="deine@gmail.com"></div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;font-size:.82rem;color:var(--text2);line-height:1.7">
+      <strong style="color:var(--text);display:block;margin-bottom:4px">Deine gespeicherten Zugangsdaten:</strong>
+      API-Key: AIzaSyD3zYOdeRkuAMVHoytbIPizEhcgYVCamlE<br>
+      Kalender-ID: 7ratmuvbti4rs4dlktlq3u1as2itt5dl@import.calendar.google.com
+    </div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeCalModal()">Abbrechen</button>
+      <button class="btn-save" onclick="saveCalSettings()">Verbinden & Laden</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM -->
 <div class="cf-overlay" id="cf-overlay">
   <div class="cf-box">
     <h3 id="cf-title">Bestätigen</h3>
-    <p id="cf-msg">Möchten Sie wirklich fortfahren?</p>
+    <p id="cf-msg"></p>
     <div class="cf-actions">
       <button class="btn-secondary" onclick="closeConfirm()">Abbrechen</button>
       <button class="btn-danger" onclick="doConfirm()">Löschen</button>
@@ -1556,7 +1497,7 @@ a{color:var(--accent)}
   </div>
 </div>
 
-<!-- ══ TOAST ══════════════════════════════════════════════════════════ -->
+<!-- TOAST -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
 </body>
